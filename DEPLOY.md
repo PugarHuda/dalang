@@ -25,10 +25,18 @@ fly deploy
 ```
 
 ## Smoke test after deploy
+A raw `curl` won't work — MCP streamable HTTP needs the `initialize` handshake and a
+session. Use a FastMCP client (`pip install fastmcp`):
 ```bash
-curl -s https://<host>/mcp -H "Accept: text/event-stream" -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | head
-# expect the generate_animatic tool in the response
+python - <<'PY'
+import asyncio
+from fastmcp import Client
+async def main():
+    async with Client("https://<host>/mcp") as c:      # e.g. .../mcp
+        print("tools:", [t.name for t in await c.list_tools()])
+asyncio.run(main())
+PY
+# expect: tools: ['generate_animatic']
 ```
 
 ## Register on OKX.AI
