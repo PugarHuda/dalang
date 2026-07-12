@@ -37,11 +37,11 @@ def dims(aspect: str) -> tuple[int, int]:
     return ASPECTS[aspect]
 
 def zoompan_filter(motion: str, sec: float, w: int, h: int, fps: int = 30) -> str:
-    """Ken Burns filter for one still. ponytail: linear z/x/y ramps; swap for
-    eased curves if the motion looks robotic."""
+    """Reframe any-aspect still to the WxH canvas WITHOUT cropping the subject:
+    a blurred cover-fill background + the full frame contained on top, then Ken Burns.
+    Image models often ignore requested dimensions, so we must not center-crop.
+    ponytail: linear z/x/y ramps; swap for eased curves if the motion looks robotic."""
     frames = max(1, round(sec * fps))
-    # oversample the source so pan has room, then zoompan crops back to WxH.
-    base = f"scale={w*2}:-1,setsar=1"
     z_in = "'min(zoom+0.0012,1.35)'"
     z_out = "'if(lte(zoom,1.0),1.35,max(1.001,zoom-0.0012))'"
     cx, cy = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
@@ -53,8 +53,15 @@ def zoompan_filter(motion: str, sec: float, w: int, h: int, fps: int = 30) -> st
         "static":    ("1.15", cx, cy),
     }
     z, x, y = moves.get(motion, moves["static"])
-    return (f"{base},zoompan=z={z}:x='{x}':y='{y}':"
-            f"d={frames}:s={w}x{h}:fps={fps},format=yuv420p")
+    # split -> blurred cover bg + contained fg overlay -> zoompan (single -vf chain)
+    return (
+        f"split=2[bg][fg];"
+        f"[bg]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},"
+        f"boxblur=24:2,eq=brightness=-0.18:saturation=1.15[bg];"
+        f"[fg]scale={w}:{h}:force_original_aspect_ratio=decrease[fg];"
+        f"[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1,"
+        f"zoompan=z={z}:x='{x}':y='{y}':d={frames}:s={w}x{h}:fps={fps},format=yuv420p"
+    )
 
 def validate_plan(plan: dict) -> dict:
     shots = plan.get("shots")
