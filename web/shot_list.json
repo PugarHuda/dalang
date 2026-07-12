@@ -1,39 +1,40 @@
 {
   "title": "Origin to Cup",
+  "subject": "A vibrant red coffee bean with a subtle golden halo, symbolizing freshness and quality, appearing in each scene",
   "shots": [
     {
       "scene": 1,
-      "image_prompt": "Sunrise over misty mountain coffee farm, golden light filtering through banana leaves, distant peaks in soft focus, cinematic warm glow, shallow depth of field, film grain.",
-      "voiceover": "From the first light on the mountain...",
+      "image_prompt": "Sunrise over misty green mountain slopes, coffee plants heavy with red cherries, golden light washing the valley, distant village smoke rising.",
+      "voiceover": "From the highest slopes, where dawn breaks first.",
       "seconds": 4,
       "motion": "zoom_in"
     },
     {
       "scene": 2,
-      "image_prompt": "Close-up of weathered hands gently picking ripe red coffee cherries against green foliage, warm morning light, dewdrops visible, shallow focus, premium detail.",
-      "voiceover": "To the careful hands that harvest each cherry...",
+      "image_prompt": "Close-up of weathered hands gently plucking ripe red coffee cherries, morning dew glistening, shallow focus on fingertips and fruit.",
+      "voiceover": "Hand-harvested at peak ripeness.",
       "seconds": 3,
       "motion": "static"
     },
     {
       "scene": 3,
-      "image_prompt": "Roasted coffee beans tumbling in slow motion, golden-brown glint in warm light, steam rising, shallow depth, cinematic grain.",
-      "voiceover": "Roasted to perfection with care.",
-      "seconds": 3,
+      "image_prompt": "Glowing coffee beans tumbling in a brass roaster, amber embers beneath, warm smoke curling into the air.",
+      "voiceover": "Small-batch roasted for depth and soul.",
+      "seconds": 4,
       "motion": "pan_left"
     },
     {
       "scene": 4,
-      "image_prompt": "Espresso pouring in slow motion into a white ceramic cup, rich crema forming, warm golden backlight, shallow focus, film texture.",
-      "voiceover": "Brewed for the perfect moment.",
+      "image_prompt": "Slow-motion espresso pour, dark liquid spiraling into a white ceramic cup, rich crema forming.",
+      "voiceover": "Every drop, a promise of purity.",
       "seconds": 4,
       "motion": "zoom_in"
     },
     {
       "scene": 5,
-      "image_prompt": "Young woman smiling on a city sidewalk at sunrise, holding a branded to-go cup, steam rising, soft golden light, shallow depth, warm tones.",
-      "voiceover": "Your morning, elevated.",
-      "seconds": 6,
+      "image_prompt": "Young professional smiling on a city sidewalk, holding a minimalist paper cup with a red bean logo, steam rising into cool morning air.",
+      "voiceover": "Your perfect cup, born from mountain light.",
+      "seconds": 5,
       "motion": "pan_right"
     }
   ]

@@ -1,0 +1,8 @@
+web/
+runs/
+.git/
+.env
+__pycache__/
+*.pyc
+demo-x-post.md
+README.md

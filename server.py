@@ -34,4 +34,8 @@ def generate_animatic(
     return render(brief, style, aspect_ratio, target_seconds, voiceover, workdir)
 
 if __name__ == "__main__":
-    mcp.run()
+    port = os.environ.get("PORT")  # container hosts (Railway/Render/Fly) set PORT
+    if port:
+        mcp.run(transport="http", host="0.0.0.0", port=int(port))
+    else:
+        mcp.run()  # stdio for local MCP clients (Claude/Cursor)

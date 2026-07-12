@@ -6,11 +6,30 @@ non-trivial logic and are exercised by demo() below. The impure steps
 a calibration knob, not clever code. One Venice key powers all three stages.
 """
 from __future__ import annotations
-import base64, json, os, subprocess, tempfile, urllib.request
+import base64, hashlib, json, os, subprocess, tempfile, time, urllib.error, urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 # ---------- pure logic (tested by demo()) ----------
 
 ASPECTS = {"9:16": (1080, 1920), "16:9": (1920, 1080), "1:1": (1080, 1080)}
+MOTIONS = {"zoom_in", "zoom_out", "pan_left", "pan_right", "static"}
+MAX_SHOTS = 10  # cost guard: refuse runaway shot lists
+
+def _norm_motion(m: str) -> str:
+    """Map a model's free-text motion to a valid token (default static).
+    Fixes gap: models return e.g. 'slow zoom in' -> was silently dropped."""
+    m = (m or "").lower().strip().replace(" ", "_").replace("-", "_")
+    if m in MOTIONS:
+        return m
+    if "zoom" in m and "in" in m:
+        return "zoom_in"
+    if "zoom" in m and "out" in m:
+        return "zoom_out"
+    if "left" in m:
+        return "pan_left"
+    if "right" in m:
+        return "pan_right"
+    return "static"
 
 def dims(aspect: str) -> tuple[int, int]:
     if aspect not in ASPECTS:
@@ -38,20 +57,25 @@ def zoompan_filter(motion: str, sec: float, w: int, h: int, fps: int = 30) -> st
             f"d={frames}:s={w}x{h}:fps={fps},format=yuv420p")
 
 def validate_plan(plan: dict) -> dict:
-    if not isinstance(plan.get("shots"), list) or not plan["shots"]:
+    shots = plan.get("shots")
+    if not isinstance(shots, list) or not shots:
         raise ValueError("plan has no shots")
-    for i, s in enumerate(plan["shots"]):
-        for k in ("image_prompt", "voiceover", "seconds", "motion"):
+    if len(shots) > MAX_SHOTS:
+        raise ValueError(f"too many shots ({len(shots)} > {MAX_SHOTS})")
+    for i, s in enumerate(shots):
+        for k in ("image_prompt", "voiceover", "seconds"):
             if k not in s:
                 raise ValueError(f"shot {i} missing {k}")
         if not (0.5 <= float(s["seconds"]) <= 15):
             raise ValueError(f"shot {i} seconds out of range: {s['seconds']}")
+        s["motion"] = _norm_motion(s.get("motion", "static"))  # never trust the enum blindly
+        s.setdefault("scene", i + 1)
     return plan
 
 def total_seconds(plan: dict) -> float:
     return round(sum(float(s["seconds"]) for s in plan["shots"]), 2)
 
-# ---------- Claude breakdown ----------
+# ---------- Venice provider (LLM + image + TTS, one key) ----------
 
 VENICE_BASE = os.environ.get("VENICE_BASE_URL", "https://api.venice.ai/api/v1")
 LLM_MODEL = os.environ.get("VENICE_LLM_MODEL", "qwen3-235b-a22b-instruct-2507")
@@ -59,14 +83,33 @@ IMAGE_MODEL = os.environ.get("VENICE_IMAGE_MODEL", "z-image-turbo")
 TTS_MODEL = os.environ.get("VENICE_TTS_MODEL", "tts-kokoro")
 TTS_VOICE = os.environ.get("VENICE_TTS_VOICE", "af_sky")
 
-def _venice(path: str, body: dict, raw: bool = False):
+_RETRYABLE = {408, 409, 429, 500, 502, 503, 504}
+
+def _venice(path: str, body: dict, raw: bool = False, tries: int = 3):
+    """POST to Venice with retry/backoff on transient errors and clean errors
+    on failure — this is a paid boundary, so it must not raise raw urllib noise."""
     key = os.environ["VENICE_API_KEY"]
-    req = urllib.request.Request(
-        VENICE_BASE + path, data=json.dumps(body).encode(),
-        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=180) as r:
-        data = r.read()
-    return data if raw else json.loads(data)
+    last = None
+    for attempt in range(tries):
+        req = urllib.request.Request(
+            VENICE_BASE + path, data=json.dumps(body).encode(),
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=180) as r:
+                data = r.read()
+            return data if raw else json.loads(data)
+        except urllib.error.HTTPError as e:
+            last = e
+            if e.code in _RETRYABLE and attempt < tries - 1:
+                time.sleep(1.5 * (attempt + 1)); continue
+            detail = e.read()[:200].decode("utf-8", "replace")
+            raise RuntimeError(f"Venice {path} HTTP {e.code}: {detail}") from e
+        except (urllib.error.URLError, TimeoutError) as e:
+            last = e
+            if attempt < tries - 1:
+                time.sleep(1.5 * (attempt + 1)); continue
+            raise RuntimeError(f"Venice {path} unreachable: {e}") from e
+    raise RuntimeError(f"Venice {path} failed after {tries} tries: {last}")
 
 def _strip_fence(s: str) -> str:
     """Some models wrap JSON in ```json fences; grab the object body."""
@@ -86,11 +129,14 @@ def breakdown(brief: str, style: str, target_seconds: int) -> dict:
     sys = (
         "You are a film director's assistant. Turn the brief into a shot list for a "
         f"~{target_seconds}s animatic. Return ONLY a JSON object with this shape: "
-        '{"title": string, "shots": [{"scene": int, "image_prompt": string, '
+        '{"title": string, "subject": string, "shots": [{"scene": int, "image_prompt": string, '
         '"voiceover": string, "seconds": number, "motion": one of '
         '["zoom_in","zoom_out","pan_left","pan_right","static"]}]}. '
+        "subject: a fixed, concrete description of the recurring hero character/product "
+        "(look, colors, wardrobe) that MUST stay consistent across every shot. "
         f"Total seconds near {target_seconds}. image_prompt: a vivid, self-contained still in "
-        f"this style: {style}, <=30 words. voiceover: one short spoken line (<=18 words) or \"\". "
+        f"this style: {style}, <=30 words; do NOT restate the subject, it is added automatically. "
+        "voiceover: one short spoken line (<=18 words) or \"\". "
         "Use EXACTLY these motion tokens. 4-6 shots, each 2-4 seconds. No prose, JSON only."
     )
     r = _venice("/chat/completions", {
@@ -101,11 +147,17 @@ def breakdown(brief: str, style: str, target_seconds: int) -> dict:
     text = _strip_fence(r["choices"][0]["message"]["content"])
     return validate_plan(json.loads(text, strict=False))  # tolerate raw newlines in strings
 
-def gen_image(prompt: str, out_path: str, w: int, h: int) -> None:
-    """Venice image -> base64 PNG. ponytail: swap VENICE_IMAGE_MODEL for FLUX 2 / Seedream."""
+def gen_image(prompt: str, out_path: str, w: int, h: int,
+              subject: str = "", seed: int | None = None) -> None:
+    """Venice image -> base64 PNG. Prepends the recurring `subject` and reuses one
+    `seed` across shots so frames share a character/palette (consistency fix).
+    ponytail: swap VENICE_IMAGE_MODEL for FLUX 2 / Seedream."""
     gw, gh = _gen_size(w, h)
-    r = _venice("/image/generate", {"model": IMAGE_MODEL, "prompt": prompt,
-                                     "width": gw, "height": gh, "format": "png"})
+    full = f"{subject.strip()}. {prompt}".strip(". ") if subject.strip() else prompt
+    body = {"model": IMAGE_MODEL, "prompt": full, "width": gw, "height": gh, "format": "png"}
+    if seed is not None:
+        body["seed"] = seed
+    r = _venice("/image/generate", body)
     with open(out_path, "wb") as f:
         f.write(base64.b64decode(r["images"][0]))
 
@@ -129,7 +181,9 @@ def build_clip(img: str, sec: float, motion: str, w: int, h: int,
     vf = zoompan_filter(motion, sec, w, h)
     cmd = ["ffmpeg", "-y", "-loop", "1", "-i", img]
     if audio:
-        cmd += ["-i", audio, "-shortest"]
+        cmd += ["-i", audio]
+    # -t (not -shortest): clip is exactly `sec`; short VO leaves trailing silence,
+    # so total duration matches the shot list instead of the voiceover length.
     cmd += ["-t", str(max(sec, 0.5)), "-vf", vf, "-r", "30",
             "-c:v", "libx264", "-pix_fmt", "yuv420p"]
     if audio:
@@ -152,18 +206,30 @@ def render(brief: str, style: str, aspect: str, target_seconds: int, voiceover: 
     """Full pipeline. Returns paths + shot list. Caller (MCP tool) owns pricing."""
     w, h = dims(aspect)
     plan = breakdown(brief, style, target_seconds)
+    subject = plan.get("subject", "")
+    seed = int(hashlib.sha256(plan["title"].encode()).hexdigest(), 16) % 100000  # stable per render
     os.makedirs(workdir, exist_ok=True)
-    frames, clips = [], []
-    for s in plan["shots"]:
-        i = s["scene"]
-        img = os.path.join(workdir, f"frame_{i:02d}.png")
-        gen_image(s["image_prompt"], img, w, h)
-        frames.append(img)
-        aud = None
-        if voiceover:
-            cand = os.path.join(workdir, f"vo_{i:02d}.mp3")
-            aud = cand if tts(s["voiceover"], cand) else None
-        clip = os.path.join(workdir, f"clip_{i:02d}.mp4")
+    shots = plan["shots"]
+
+    def do_frame(s):
+        img = os.path.join(workdir, f"frame_{s['scene']:02d}.png")
+        gen_image(s["image_prompt"], img, w, h, subject, seed)
+        return img
+
+    def do_tts(s):
+        if not voiceover:
+            return None
+        cand = os.path.join(workdir, f"vo_{s['scene']:02d}.mp3")
+        return cand if tts(s["voiceover"], cand) else None
+
+    # network-bound stages run in parallel (gap fix: was serial ~90s)
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        frames = list(ex.map(do_frame, shots))
+        auds = list(ex.map(do_tts, shots))
+
+    clips = []
+    for s, img, aud in zip(shots, frames, auds):  # ffmpeg kept serial (CPU-bound)
+        clip = os.path.join(workdir, f"clip_{s['scene']:02d}.mp4")
         build_clip(img, float(s["seconds"]), s["motion"], w, h, aud, clip)
         clips.append(clip)
     animatic = os.path.join(workdir, "animatic.mp4")
@@ -189,16 +255,23 @@ def demo() -> None:
     assert _gen_size(1024, 1024) == (1024, 1024)
     assert json.loads(_strip_fence('```json\n{"a":1}\n```')) == {"a": 1}
     assert json.loads(_strip_fence('{"b":2}')) == {"b": 2}
+    assert _norm_motion("slow zoom in") == "zoom_in"
+    assert _norm_motion("Pan-Right") == "pan_right"
+    assert _norm_motion("dolly") == "static"
     plan = {"title": "t", "shots": [
-        {"scene": 1, "image_prompt": "a", "voiceover": "hi", "seconds": 3, "motion": "zoom_in"},
-        {"scene": 2, "image_prompt": "b", "voiceover": "", "seconds": 2.5, "motion": "static"},
+        {"scene": 1, "image_prompt": "a", "voiceover": "hi", "seconds": 3, "motion": "zoom in"},
+        {"image_prompt": "b", "voiceover": "", "seconds": 2.5},  # no scene/motion -> defaults
     ]}
-    assert total_seconds(validate_plan(plan)) == 5.5
-    try:
-        validate_plan({"shots": [{"image_prompt": "x", "voiceover": "", "seconds": 99, "motion": "static"}]})
-        assert False
-    except ValueError:
-        pass
+    v = validate_plan(plan)
+    assert total_seconds(v) == 5.5
+    assert v["shots"][0]["motion"] == "zoom_in" and v["shots"][1]["motion"] == "static"
+    assert v["shots"][1]["scene"] == 2
+    for bad in ([{"image_prompt": "x", "voiceover": "", "seconds": 99}],
+                [{"image_prompt": "x", "voiceover": "", "seconds": 3}] * 11):
+        try:
+            validate_plan({"shots": bad}); assert False
+        except ValueError:
+            pass
     print("dalang pipeline self-check ok")
 
 if __name__ == "__main__":
