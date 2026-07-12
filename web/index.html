@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DALANG — Script to Animatic, in one call</title>
+<meta name="description" content="DALANG turns one line of script into a storyboard and a narrated animatic video. An Agentic Service Provider on OKX.AI.">
+<meta property="og:title" content="DALANG — Script to Animatic">
+<meta property="og:description" content="One line of script → storyboard + narrated animatic. Live on OKX.AI, pay-per-call.">
+<style>
+  :root{
+    --bg:#0b0a09; --panel:#141210; --ink:#f4efe6; --muted:#a89f90;
+    --gold:#e0a340; --gold2:#f2c66b; --line:#2a251f;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:radial-gradient(1200px 600px at 50% -10%,#1c1712,transparent),var(--bg);
+    color:var(--ink); font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--gold2);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:1040px;margin:0 auto;padding:0 20px}
+  header{padding:26px 0;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .brand{font-weight:800;letter-spacing:.14em;font-size:20px}
+  .brand b{color:var(--gold)}
+  .pill{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:6px 12px}
+  .hero{display:grid;grid-template-columns:1.1fr .9fr;gap:40px;align-items:center;padding:48px 0 24px}
+  @media(max-width:820px){.hero{grid-template-columns:1fr;gap:28px}}
+  h1{font-size:clamp(34px,6vw,56px);line-height:1.05;margin:0 0 14px;letter-spacing:-.01em}
+  h1 .g{background:linear-gradient(90deg,var(--gold),var(--gold2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .lede{font-size:19px;color:var(--muted);margin:0 0 26px;max-width:38ch}
+  .cta{display:flex;gap:12px;flex-wrap:wrap}
+  .btn{display:inline-block;padding:12px 20px;border-radius:12px;font-weight:700}
+  .btn.primary{background:linear-gradient(90deg,var(--gold),var(--gold2));color:#1a1206}
+  .btn.ghost{border:1px solid var(--line);color:var(--ink)}
+  .phone{justify-self:center;width:300px;max-width:80vw;border:10px solid #000;border-radius:36px;
+    box-shadow:0 30px 80px rgba(0,0,0,.6),0 0 0 1px var(--line);overflow:hidden;background:#000;aspect-ratio:9/16}
+  .phone video{width:100%;height:100%;display:block;object-fit:cover}
+  .kicker{color:var(--gold);font-weight:700;letter-spacing:.12em;font-size:12px;text-transform:uppercase}
+  section{padding:40px 0;border-top:1px solid var(--line)}
+  h2{font-size:clamp(24px,4vw,32px);margin:6px 0 20px}
+  .grid{display:grid;gap:16px}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  @media(max-width:820px){.g4,.g3{grid-template-columns:1fr 1fr}}
+  @media(max-width:520px){.g4,.g3{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px}
+  .card h3{margin:0 0 6px;font-size:16px}
+  .card p{margin:0;color:var(--muted);font-size:14px}
+  .step .n{color:var(--gold);font-weight:800;font-size:13px;letter-spacing:.1em}
+  .flow{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);font-size:13px;
+    background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;overflow-x:auto;white-space:pre}
+  .price{display:flex;align-items:baseline;gap:10px}
+  .price .big{font-size:40px;font-weight:800;color:var(--gold2)}
+  footer{padding:36px 0 60px;color:var(--muted);font-size:14px;text-align:center;border-top:1px solid var(--line)}
+  .tag{display:inline-block;font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:4px 10px;margin:2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="brand">🎬 <b>DALANG</b></div>
+    <div class="pill">Agentic Service Provider · OKX.AI</div>
+  </header>
+
+  <div class="hero">
+    <div>
+      <div class="kicker">Script → Storyboard → Video</div>
+      <h1>Turn one line of script into a <span class="g">narrated animatic</span>.</h1>
+      <p class="lede">DALANG breaks your brief into a shot list, generates every frame, adds voiceover, and assembles a ready-to-share video — in one call. No editor, no timeline, no waiting.</p>
+      <div class="cta">
+        <a class="btn primary" href="#demo">Watch the demo</a>
+        <a class="btn ghost" href="#build">How it works</a>
+      </div>
+    </div>
+    <div class="phone" id="demo">
+      <video src="demo.mp4" autoplay muted loop playsinline controls></video>
+    </div>
+  </div>
+
+  <section id="build">
+    <div class="kicker">Pipeline</div>
+    <h2>One brief in, a finished animatic out</h2>
+    <div class="grid g4">
+      <div class="card step"><div class="n">01</div><h3>Break down</h3><p>An LLM turns your brief into a structured shot list — scene, image prompt, voiceover line, camera motion.</p></div>
+      <div class="card step"><div class="n">02</div><h3>Generate frames</h3><p>Each shot becomes a cinematic still in the art direction you specify.</p></div>
+      <div class="card step"><div class="n">03</div><h3>Narrate</h3><p>Every line is voiced with text-to-speech, per shot.</p></div>
+      <div class="card step"><div class="n">04</div><h3>Assemble</h3><p>Ken Burns motion + audio, stitched by ffmpeg into a single MP4.</p></div>
+    </div>
+    <div style="height:16px"></div>
+    <div class="flow">brief ─► LLM (shot list) ─┬─► image (frame) ──┐
+                          ├─► TTS (voiceover) ─┼─► Ken Burns (ffmpeg) ─► animatic.mp4
+                          └────────────────────┘</div>
+  </section>
+
+  <section>
+    <div class="kicker">Built for the agent economy</div>
+    <h2>Live on OKX.AI, pay-per-call</h2>
+    <div class="grid g3">
+      <div class="card"><h3>A2MCP</h3><p>Registered as a standardized pay-per-call service — one call, one animatic.</p></div>
+      <div class="card"><h3>Settled on X Layer</h3><p>Paid in USDT/USDG stablecoins, instantly, on OKX's chain.</p></div>
+      <div class="card"><h3>Category: Art Creation</h3><p>Targeting Artistic Excellence + Social Buzz at the OKX.AI Genesis Hackathon.</p></div>
+    </div>
+    <div style="height:18px"></div>
+    <div class="card">
+      <div class="price"><span class="big">$0.49</span><span style="color:var(--muted)">per animatic · cost ≈ $0.05–0.08 · healthy margin</span></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="kicker">Under the hood</div>
+    <h2>One key, three model types</h2>
+    <p style="color:var(--muted);max-width:60ch;margin-top:0">LLM breakdown, image generation, and voice synthesis all run through a single OpenAI-compatible provider; assembly is ffmpeg. Every provider is a swappable env var.</p>
+    <div>
+      <span class="tag">LLM: shot-list reasoning</span>
+      <span class="tag">Image: cinematic frames</span>
+      <span class="tag">TTS: per-shot voiceover</span>
+      <span class="tag">ffmpeg: Ken Burns + concat</span>
+      <span class="tag">MCP: A2MCP tool</span>
+    </div>
+  </section>
+
+  <footer>
+    <p><b>DALANG</b> — build, narrate, ship. &nbsp;·&nbsp; #OKXAI</p>
+    <p>The render engine (ffmpeg pipeline) runs on the MCP/container host; this page is the showcase.</p>
+  </footer>
+
+</div>
+</body>
+</html>

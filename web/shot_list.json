@@ -1,0 +1,40 @@
+{
+  "title": "Origin to Cup",
+  "shots": [
+    {
+      "scene": 1,
+      "image_prompt": "Sunrise over misty mountain coffee farm, golden light filtering through banana leaves, distant peaks in soft focus, cinematic warm glow, shallow depth of field, film grain.",
+      "voiceover": "From the first light on the mountain...",
+      "seconds": 4,
+      "motion": "zoom_in"
+    },
+    {
+      "scene": 2,
+      "image_prompt": "Close-up of weathered hands gently picking ripe red coffee cherries against green foliage, warm morning light, dewdrops visible, shallow focus, premium detail.",
+      "voiceover": "To the careful hands that harvest each cherry...",
+      "seconds": 3,
+      "motion": "static"
+    },
+    {
+      "scene": 3,
+      "image_prompt": "Roasted coffee beans tumbling in slow motion, golden-brown glint in warm light, steam rising, shallow depth, cinematic grain.",
+      "voiceover": "Roasted to perfection with care.",
+      "seconds": 3,
+      "motion": "pan_left"
+    },
+    {
+      "scene": 4,
+      "image_prompt": "Espresso pouring in slow motion into a white ceramic cup, rich crema forming, warm golden backlight, shallow focus, film texture.",
+      "voiceover": "Brewed for the perfect moment.",
+      "seconds": 4,
+      "motion": "zoom_in"
+    },
+    {
+      "scene": 5,
+      "image_prompt": "Young woman smiling on a city sidewalk at sunrise, holding a branded to-go cup, steam rising, soft golden light, shallow depth, warm tones.",
+      "voiceover": "Your morning, elevated.",
+      "seconds": 6,
+      "motion": "pan_right"
+    }
+  ]
+}
