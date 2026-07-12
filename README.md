@@ -9,9 +9,14 @@ Target: **Artistic Excellence** (an underserved category) + **Social Buzz** (a
 shareable demo video). Mode: **A2MCP pay-per-call**.
 
 ## ✅ Proven end-to-end
-Real run (Venice, brief "cinematic local-coffee ad", 9:16, 20s): 5-shot list →
-5 flux-2-pro frames → 5 voiceovers → `animatic.mp4` **h264 1080×1920 + AAC audio,
-2.5 MB, ~90s**. The 30s coffee demo on the landing page was produced by this code.
+Real runs: shot list → frames → per-shot voiceover → blurred-reframe Ken Burns →
+`animatic.mp4` (h264 **1080×1920** + AAC). The landing-page demo ("From Seed to Cup",
+20s, 1.4 MB) keeps one recurring barista across 6 shots. HTTP MCP transport tested
+with a real client (`tools/list` + `generate_animatic` → data-URI video).
+
+**Performance:** default (`z-image-turbo`, `consistent=True`) ≈ 60–80s per render;
+`consistent=False` or a faster editor is quicker. This is a generative ASP — expect
+tens of seconds per call, and give the MCP host a generous timeout.
 
 ## Architecture — one Venice key for all three stages
 ```

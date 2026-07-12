@@ -5,7 +5,21 @@ OKX wraps the pay-per-call settlement (USDT/USDG on X Layer) around it.
 """
 import base64, os, uuid
 from fastmcp import FastMCP
-from pipeline import render
+
+
+def _load_dotenv(path: str = ".env") -> None:
+    """Load .env if present so `python server.py` works after `cp .env.example .env`
+    without exporting first — no python-dotenv dependency needed."""
+    if os.path.exists(path):
+        for line in open(path, encoding="utf-8"):
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip())
+
+
+_load_dotenv()
+from pipeline import render  # imported after .env load
 
 # A remote A2MCP caller can't read the host's filesystem, so we embed the video
 # (and shot list) in the result. Above this size, skip the blob and return the

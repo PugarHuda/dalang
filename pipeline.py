@@ -53,8 +53,10 @@ def zoompan_filter(motion: str, sec: float, w: int, h: int, fps: int = 30) -> st
         "static":    ("1.15", cx, cy),
     }
     z, x, y = moves.get(motion, moves["static"])
-    # split -> blurred cover bg + contained fg overlay -> zoompan (single -vf chain)
+    long = max(w, h)  # cap the (often 2500px) source first so boxblur isn't glacial
+    # downscale -> split -> blurred cover bg + contained fg overlay -> zoompan (single -vf chain)
     return (
+        f"scale={long}:{long}:force_original_aspect_ratio=decrease,"
         f"split=2[bg][fg];"
         f"[bg]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},"
         f"boxblur=24:2,eq=brightness=-0.18:saturation=1.15[bg];"
@@ -87,7 +89,7 @@ def total_seconds(plan: dict) -> float:
 VENICE_BASE = os.environ.get("VENICE_BASE_URL", "https://api.venice.ai/api/v1")
 LLM_MODEL = os.environ.get("VENICE_LLM_MODEL", "qwen3-235b-a22b-instruct-2507")
 IMAGE_MODEL = os.environ.get("VENICE_IMAGE_MODEL", "z-image-turbo")
-EDIT_MODEL = os.environ.get("VENICE_EDIT_MODEL", "qwen-image-2-edit")  # reference-based consistency
+EDIT_MODEL = os.environ.get("VENICE_EDIT_MODEL", "qwen-image-2-edit")  # reliable editor (fast lite models refuse people)
 TTS_MODEL = os.environ.get("VENICE_TTS_MODEL", "tts-kokoro")
 TTS_VOICE = os.environ.get("VENICE_TTS_VOICE", "af_sky")
 
@@ -205,7 +207,7 @@ def build_clip(img: str, sec: float, motion: str, w: int, h: int,
     # -t (not -shortest): clip is exactly `sec`; short VO leaves trailing silence,
     # so total duration matches the shot list instead of the voiceover length.
     cmd += ["-t", str(max(sec, 0.5)), "-vf", vf, "-r", "30",
-            "-c:v", "libx264", "-pix_fmt", "yuv420p"]
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "26"]
     if audio:
         cmd += ["-c:a", "aac"]
     cmd += [out]
@@ -218,7 +220,8 @@ def assemble(clips: list[str], out: str) -> None:
             f.write(f"file '{os.path.abspath(c)}'\n")
         listfile = f.name
     _run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", listfile,
-          "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", out])
+          "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "26",
+          "-c:a", "aac", "-movflags", "+faststart", out])  # crf+faststart: smaller, streamable
     os.unlink(listfile)
 
 def render(brief: str, style: str, aspect: str, target_seconds: int, voiceover: bool,
@@ -249,11 +252,17 @@ def render(brief: str, style: str, aspect: str, target_seconds: int, voiceover: 
     if consistent and len(shots) > 1:
         hero = frame_path(shots[0])
         gen_image(shots[0]["image_prompt"], hero, w, h, subject, seed)  # hero first (dependency)
+
+        def consistent_frame(s):
+            out = frame_path(s)
+            try:  # best-effort: a single edit refusal/failure must not kill the render
+                edit_image(s["image_prompt"], hero, out, subject)
+            except Exception:
+                gen_image(s["image_prompt"], out, w, h, subject, seed)  # fall back to fresh gen
+            return out
+
         with ThreadPoolExecutor(max_workers=6) as ex:
-            edited = list(ex.map(
-                lambda s: (edit_image(s["image_prompt"], hero, frame_path(s), subject)
-                           or frame_path(s)),
-                shots[1:]))
+            edited = list(ex.map(consistent_frame, shots[1:]))
         frames = [hero] + edited
     else:
         with ThreadPoolExecutor(max_workers=6) as ex:
@@ -265,11 +274,14 @@ def render(brief: str, style: str, aspect: str, target_seconds: int, voiceover: 
     with ThreadPoolExecutor(max_workers=6) as ex:
         auds = list(ex.map(do_tts, shots))
 
-    clips = []
-    for s, img, aud in zip(shots, frames, auds):  # ffmpeg kept serial (CPU-bound)
+    def do_clip(args):
+        s, img, aud = args
         clip = os.path.join(workdir, f"clip_{s['scene']:02d}.mp4")
         build_clip(img, float(s["seconds"]), s["motion"], w, h, aud, clip)
-        clips.append(clip)
+        return clip
+
+    with ThreadPoolExecutor(max_workers=3) as ex:  # a few ffmpeg procs across cores
+        clips = list(ex.map(do_clip, zip(shots, frames, auds)))
     animatic = os.path.join(workdir, "animatic.mp4")
     assemble(clips, animatic)
     shotlist = os.path.join(workdir, "shot_list.json")
