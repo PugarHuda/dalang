@@ -35,6 +35,7 @@ def generate_animatic(
 
     Returns paths to the animatic mp4, storyboard frames, and the shot-list JSON.
     """
+    target_seconds = max(8, min(90, int(target_seconds)))  # cost guard: bound the render
     workdir = os.path.join(WORKROOT, uuid.uuid4().hex[:12])
     result = render(brief, style, aspect_ratio, target_seconds, voiceover, workdir)
     size = os.path.getsize(result["animatic"])

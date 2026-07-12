@@ -1,4 +1,4 @@
-fastmcp>=2.0
+fastmcp==3.4.4
 # LLM + image + TTS all go through Venice (OpenAI-compatible) via stdlib urllib —
 # no extra client libs needed.
 # system dependency (not pip): ffmpeg must be on PATH

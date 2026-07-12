@@ -132,8 +132,9 @@ def breakdown(brief: str, style: str, target_seconds: int) -> dict:
         '{"title": string, "subject": string, "shots": [{"scene": int, "image_prompt": string, '
         '"voiceover": string, "seconds": number, "motion": one of '
         '["zoom_in","zoom_out","pan_left","pan_right","static"]}]}. '
-        "subject: a fixed, concrete description of the recurring hero character/product "
-        "(look, colors, wardrobe) that MUST stay consistent across every shot. "
+        "subject: a fixed, concrete description of ONE recurring hero — prefer a specific "
+        "person or the actual product (face/look, colors, wardrobe/packaging) so it is "
+        "recognizably the SAME in every shot; avoid abstract symbols. "
         f"Total seconds near {target_seconds}. image_prompt: a vivid, self-contained still in "
         f"this style: {style}, <=30 words; do NOT restate the subject, it is added automatically. "
         "voiceover: one short spoken line (<=18 words) or \"\". "

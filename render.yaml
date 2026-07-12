@@ -1,0 +1,12 @@
+# Render.com blueprint — one-click deploy of the DALANG ASP.
+# render.com → New → Blueprint → point at this repo. Set VENICE_API_KEY when prompted.
+services:
+  - type: web
+    name: dalang
+    runtime: docker
+    plan: starter
+    autoDeploy: true
+    envVars:
+      - key: VENICE_API_KEY
+        sync: false   # set in the dashboard; never commit the key
+# MCP endpoint after deploy: https://<app>.onrender.com/mcp
