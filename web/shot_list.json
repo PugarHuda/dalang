@@ -1,40 +1,47 @@
 {
-  "title": "Origin to Cup",
-  "subject": "A vibrant red coffee bean with a subtle golden halo, symbolizing freshness and quality, appearing in each scene",
+  "title": "From Seed to Cup",
+  "subject": "Liam, a friendly bearded barista with warm brown eyes, wearing a cream-colored apron with the logo 'Haven Roast' in burnt umber, earth-toned flannel shirt, and rugged boots",
   "shots": [
     {
       "scene": 1,
-      "image_prompt": "Sunrise over misty green mountain slopes, coffee plants heavy with red cherries, golden light washing the valley, distant village smoke rising.",
-      "voiceover": "From the highest slopes, where dawn breaks first.",
+      "image_prompt": "Cinematic wide shot of misty highland coffee farm at golden hour, red clay soil, vibrant green coffee plants in soft focus, warm light cutting through morning fog, film grain texture, premium commercial style",
+      "voiceover": "It starts where the soil is rich and the air is pure.",
       "seconds": 4,
       "motion": "zoom_in"
     },
     {
       "scene": 2,
-      "image_prompt": "Close-up of weathered hands gently plucking ripe red coffee cherries, morning dew glistening, shallow focus on fingertips and fruit.",
-      "voiceover": "Hand-harvested at peak ripeness.",
+      "image_prompt": "Close-up of weathered hands carefully picking bright red coffee cherries, sunlight dappling through leaves, shallow depth of field, golden-hour warmth, film grain",
+      "voiceover": "Grown with care, harvested by hand.",
       "seconds": 3,
       "motion": "static"
     },
     {
       "scene": 3,
-      "image_prompt": "Glowing coffee beans tumbling in a brass roaster, amber embers beneath, warm smoke curling into the air.",
-      "voiceover": "Small-batch roasted for depth and soul.",
+      "image_prompt": "Liam in profile, roasting beans in a small copper drum roaster, amber glow of firelight on his beard and apron, smoke curling softly, warm bokeh background",
+      "voiceover": "Roasted slow. Just the way we like it.",
       "seconds": 4,
       "motion": "pan_left"
     },
     {
       "scene": 4,
-      "image_prompt": "Slow-motion espresso pour, dark liquid spiraling into a white ceramic cup, rich crema forming.",
-      "voiceover": "Every drop, a promise of purity.",
-      "seconds": 4,
+      "image_prompt": "Low-angle shot of Liam placing a fresh bag of 'Haven Roast' beans on a rustic wooden counter, label visible, soft sunlight from a nearby window, shallow focus",
+      "voiceover": "Small batches. Big flavor.",
+      "seconds": 3,
       "motion": "zoom_in"
     },
     {
       "scene": 5,
-      "image_prompt": "Young professional smiling on a city sidewalk, holding a minimalist paper cup with a red bean logo, steam rising into cool morning air.",
-      "voiceover": "Your perfect cup, born from mountain light.",
-      "seconds": 5,
+      "image_prompt": "Close-up of espresso pouring into a white ceramic cup, rich crema forming, steam rising, shallow depth of field, golden light",
+      "voiceover": "",
+      "seconds": 3,
+      "motion": "static"
+    },
+    {
+      "scene": 6,
+      "image_prompt": "Liam smiling, handing the espresso to a customer in a sunlit cafe, his apron clearly showing the 'Haven Roast' logo, warm bokeh lights in background",
+      "voiceover": "Haven Roast. Crafted for your moment.",
+      "seconds": 3,
       "motion": "pan_right"
     }
   ]

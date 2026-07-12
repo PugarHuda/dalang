@@ -80,6 +80,7 @@ def total_seconds(plan: dict) -> float:
 VENICE_BASE = os.environ.get("VENICE_BASE_URL", "https://api.venice.ai/api/v1")
 LLM_MODEL = os.environ.get("VENICE_LLM_MODEL", "qwen3-235b-a22b-instruct-2507")
 IMAGE_MODEL = os.environ.get("VENICE_IMAGE_MODEL", "z-image-turbo")
+EDIT_MODEL = os.environ.get("VENICE_EDIT_MODEL", "qwen-image-2-edit")  # reference-based consistency
 TTS_MODEL = os.environ.get("VENICE_TTS_MODEL", "tts-kokoro")
 TTS_VOICE = os.environ.get("VENICE_TTS_VOICE", "af_sky")
 
@@ -162,6 +163,17 @@ def gen_image(prompt: str, out_path: str, w: int, h: int,
     with open(out_path, "wb") as f:
         f.write(base64.b64decode(r["images"][0]))
 
+def edit_image(prompt: str, ref_path: str, out_path: str, subject: str = "") -> None:
+    """Transform a reference frame into a new scene while keeping the same subject
+    (Venice /image/edit; returns raw PNG bytes). This is the strong consistency path:
+    every shot after the hero is an edit of the hero, so the character/product holds."""
+    b64 = base64.b64encode(open(ref_path, "rb").read()).decode()
+    keep = f" Keep the exact same {subject}." if subject.strip() else ""
+    img = _venice("/image/edit",
+                  {"model": EDIT_MODEL, "prompt": f"{prompt}.{keep}", "image": b64}, raw=True)
+    with open(out_path, "wb") as f:
+        f.write(img)
+
 def tts(text: str, out_path: str) -> bool:
     """Venice TTS (Kokoro). False (silent shot) when the line is empty."""
     if not text.strip():
@@ -203,8 +215,13 @@ def assemble(clips: list[str], out: str) -> None:
     os.unlink(listfile)
 
 def render(brief: str, style: str, aspect: str, target_seconds: int, voiceover: bool,
-           workdir: str) -> dict:
-    """Full pipeline. Returns paths + shot list. Caller (MCP tool) owns pricing."""
+           workdir: str, consistent: bool = True) -> dict:
+    """Full pipeline. Returns paths + shot list. Caller (MCP tool) owns pricing.
+
+    consistent=True: generate a hero frame, then produce every other frame by
+    editing the hero into the new scene, so the subject stays the same across shots.
+    consistent=False: each frame is an independent text-to-image (cheaper, less coherent).
+    """
     w, h = dims(aspect)
     plan = breakdown(brief, style, target_seconds)
     subject = plan.get("subject", "")
@@ -212,10 +229,8 @@ def render(brief: str, style: str, aspect: str, target_seconds: int, voiceover: 
     os.makedirs(workdir, exist_ok=True)
     shots = plan["shots"]
 
-    def do_frame(s):
-        img = os.path.join(workdir, f"frame_{s['scene']:02d}.png")
-        gen_image(s["image_prompt"], img, w, h, subject, seed)
-        return img
+    def frame_path(s):
+        return os.path.join(workdir, f"frame_{s['scene']:02d}.png")
 
     def do_tts(s):
         if not voiceover:
@@ -223,9 +238,24 @@ def render(brief: str, style: str, aspect: str, target_seconds: int, voiceover: 
         cand = os.path.join(workdir, f"vo_{s['scene']:02d}.mp3")
         return cand if tts(s["voiceover"], cand) else None
 
-    # network-bound stages run in parallel (gap fix: was serial ~90s)
+    # frames
+    if consistent and len(shots) > 1:
+        hero = frame_path(shots[0])
+        gen_image(shots[0]["image_prompt"], hero, w, h, subject, seed)  # hero first (dependency)
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            edited = list(ex.map(
+                lambda s: (edit_image(s["image_prompt"], hero, frame_path(s), subject)
+                           or frame_path(s)),
+                shots[1:]))
+        frames = [hero] + edited
+    else:
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            frames = list(ex.map(
+                lambda s: (gen_image(s["image_prompt"], frame_path(s), w, h, subject, seed)
+                           or frame_path(s)),
+                shots))
+    # voiceovers (independent, parallel)
     with ThreadPoolExecutor(max_workers=6) as ex:
-        frames = list(ex.map(do_frame, shots))
         auds = list(ex.map(do_tts, shots))
 
     clips = []

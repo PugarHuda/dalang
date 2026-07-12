@@ -23,6 +23,7 @@ def generate_animatic(
     aspect_ratio: str = "9:16",
     target_seconds: int = 30,
     voiceover: bool = True,
+    consistent: bool = True,
 ) -> dict:
     """Turn a script or idea into a storyboard + narrated animatic video.
 
@@ -31,13 +32,14 @@ def generate_animatic(
         style: visual style for every frame (art direction).
         aspect_ratio: "9:16" | "16:9" | "1:1".
         target_seconds: rough total length (8-90).
-        voiceover: narrate each shot (needs ELEVENLABS_API_KEY; silent if absent).
+        voiceover: narrate each shot with text-to-speech.
+        consistent: keep one recurring subject across shots (hero frame + edits).
 
-    Returns paths to the animatic mp4, storyboard frames, and the shot-list JSON.
+    Returns the animatic (as a base64 data URI), storyboard frames, and shot list.
     """
     target_seconds = max(8, min(90, int(target_seconds)))  # cost guard: bound the render
     workdir = os.path.join(WORKROOT, uuid.uuid4().hex[:12])
-    result = render(brief, style, aspect_ratio, target_seconds, voiceover, workdir)
+    result = render(brief, style, aspect_ratio, target_seconds, voiceover, workdir, consistent)
     size = os.path.getsize(result["animatic"])
     result["animatic_bytes"] = size
     if size <= MAX_INLINE_BYTES:  # make the result usable by a remote caller
