@@ -38,3 +38,9 @@ curl -s https://<host>/mcp -H "Accept: text/event-stream" -H "Content-Type: appl
 
 > Cost per call ≈ $0.05–0.08 (Venice LLM + images + TTS). Keep `VENICE_API_KEY`
 > only in the host's secret store — never in the repo.
+
+## Protect a directly-exposed endpoint
+`/mcp` runs paid compute. Behind OKX's A2MCP gating you can leave it open, but if the
+URL is reachable publicly, set **`DALANG_ACCESS_KEY`** — the tool then rejects any call
+without a matching `access_key` argument, so a leaked URL can't drain your Venice balance.
+Per-render files are cleaned automatically (set `DALANG_KEEP_FILES=1` to keep them for debugging).

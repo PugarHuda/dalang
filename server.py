@@ -3,7 +3,7 @@
 One tool = one billable call. Register this MCP server on OKX.AI in A2MCP mode;
 OKX wraps the pay-per-call settlement (USDT/USDG on X Layer) around it.
 """
-import base64, os, uuid
+import base64, json, os, shutil, uuid
 from fastmcp import FastMCP
 
 
@@ -29,6 +29,11 @@ MAX_INLINE_BYTES = int(os.environ.get("DALANG_MAX_INLINE_BYTES", 8_000_000))
 mcp = FastMCP("dalang")
 
 WORKROOT = os.environ.get("DALANG_WORKROOT", os.path.join(os.getcwd(), "runs"))
+VALID_ASPECTS = ("9:16", "16:9", "1:1")
+# Opt-in gate: if set, the paid tool requires a matching access_key. Leave unset
+# behind OKX's own A2MCP gating; set it if you expose /mcp directly to the public.
+ACCESS_KEY = os.environ.get("DALANG_ACCESS_KEY")
+KEEP_FILES = bool(os.environ.get("DALANG_KEEP_FILES"))  # else workdir is cleaned per call
 
 @mcp.tool
 def generate_animatic(
@@ -38,6 +43,7 @@ def generate_animatic(
     target_seconds: int = 30,
     voiceover: bool = True,
     consistent: bool = True,
+    access_key: str = "",
 ) -> dict:
     """Turn a script or idea into a storyboard + narrated animatic video.
 
@@ -48,18 +54,41 @@ def generate_animatic(
         target_seconds: rough total length (8-90).
         voiceover: narrate each shot with text-to-speech.
         consistent: keep one recurring subject across shots (hero frame + edits).
+        access_key: required only if the server sets DALANG_ACCESS_KEY.
 
-    Returns the animatic (as a base64 data URI), storyboard frames, and shot list.
+    Returns the animatic as a base64 data URI, the shot list, and metadata.
+    On failure returns {"error": ...} instead of raising.
     """
-    target_seconds = max(8, min(90, int(target_seconds)))  # cost guard: bound the render
+    if ACCESS_KEY and access_key != ACCESS_KEY:
+        return {"error": "unauthorized: valid access_key required"}
+    brief = (brief or "").strip()
+    if not brief:
+        return {"error": "brief is required"}
+    if aspect_ratio not in VALID_ASPECTS:
+        return {"error": f"aspect_ratio must be one of {list(VALID_ASPECTS)}"}
+    target_seconds = max(8, min(90, int(target_seconds)))  # cost guard
+
     workdir = os.path.join(WORKROOT, uuid.uuid4().hex[:12])
-    result = render(brief, style, aspect_ratio, target_seconds, voiceover, workdir, consistent)
-    size = os.path.getsize(result["animatic"])
-    result["animatic_bytes"] = size
-    if size <= MAX_INLINE_BYTES:  # make the result usable by a remote caller
+    try:
+        result = render(brief, style, aspect_ratio, target_seconds, voiceover, workdir, consistent)
+        size = os.path.getsize(result["animatic"])
         with open(result["animatic"], "rb") as f:
-            result["animatic_data_uri"] = "data:video/mp4;base64," + base64.b64encode(f.read()).decode()
-    return result
+            video = f.read()
+        plan = json.load(open(result["shot_list"], encoding="utf-8"))
+        out = {"title": result["title"], "duration_seconds": result["duration_seconds"],
+               "animatic_bytes": size, "subject": plan.get("subject", ""), "shots": plan.get("shots", [])}
+        if size <= MAX_INLINE_BYTES:  # embed so a remote caller can actually use it
+            out["animatic_data_uri"] = "data:video/mp4;base64," + base64.b64encode(video).decode()
+        else:
+            out["warning"] = f"animatic {size} bytes exceeds inline cap ({MAX_INLINE_BYTES}); host object storage"
+        if KEEP_FILES:  # local debugging keeps the files + paths
+            out.update({k: result[k] for k in ("animatic", "frames", "shot_list")})
+        return out
+    except Exception as e:  # clean error at the paid boundary, never a raw stack trace
+        return {"error": f"render failed: {e}"}
+    finally:
+        if not KEEP_FILES:  # no disk leak on the host
+            shutil.rmtree(workdir, ignore_errors=True)
 
 if __name__ == "__main__":
     port = os.environ.get("PORT")  # container hosts (Railway/Render/Fly) set PORT
