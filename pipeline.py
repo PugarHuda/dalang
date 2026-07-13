@@ -79,6 +79,10 @@ def validate_plan(plan: dict) -> dict:
             raise ValueError(f"shot {i} seconds out of range: {s['seconds']}")
         s["motion"] = _norm_motion(s.get("motion", "static"))  # never trust the enum blindly
         s.setdefault("scene", i + 1)
+    # render/server read title (seed) + subject; the LLM may omit them or send non-str.
+    # Guarantee both here (the single gate) so a paid render can't KeyError on a title.
+    plan["title"] = str(plan.get("title") or "Untitled animatic")
+    plan["subject"] = str(plan.get("subject") or "")
     return plan
 
 def total_seconds(plan: dict) -> float:
@@ -316,6 +320,10 @@ def demo() -> None:
     assert total_seconds(v) == 5.5
     assert v["shots"][0]["motion"] == "zoom_in" and v["shots"][1]["motion"] == "static"
     assert v["shots"][1]["scene"] == 2
+    assert v["title"] == "t" and v["subject"] == ""  # subject defaulted when absent
+    miss = validate_plan({"subject": 7, "shots": [  # no title, non-str subject: must not crash render
+        {"image_prompt": "a", "voiceover": "", "seconds": 2}]})
+    assert miss["title"] == "Untitled animatic" and miss["subject"] == "7"
     for bad in ([{"image_prompt": "x", "voiceover": "", "seconds": 99}],
                 [{"image_prompt": "x", "voiceover": "", "seconds": 3}] * 11):
         try:
