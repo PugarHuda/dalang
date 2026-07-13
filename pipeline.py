@@ -264,7 +264,10 @@ def render(brief: str, style: str, aspect: str, target_seconds: int, voiceover: 
         if not voiceover:
             return None
         cand = os.path.join(workdir, f"vo_{s['scene']:02d}.mp3")
-        return cand if tts(s["voiceover"], cand) else None
+        try:  # best-effort like frames: a flaky VO -> silent shot, never a failed render
+            return cand if tts(s["voiceover"], cand) else None
+        except Exception:
+            return None
 
     # frames
     if consistent and len(shots) > 1:
