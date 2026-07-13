@@ -78,7 +78,7 @@ def validate_plan(plan: dict) -> dict:
         if not (0.5 <= float(s["seconds"]) <= 15):
             raise ValueError(f"shot {i} seconds out of range: {s['seconds']}")
         s["motion"] = _norm_motion(s.get("motion", "static"))  # never trust the enum blindly
-        s.setdefault("scene", i + 1)
+        s["scene"] = i + 1  # renumber, don't trust: dup/misnumbered scenes collide frame/clip paths
     # render/server read title (seed) + subject; the LLM may omit them or send non-str.
     # Guarantee both here (the single gate) so a paid render can't KeyError on a title.
     plan["title"] = str(plan.get("title") or "Untitled animatic")
@@ -338,6 +338,10 @@ def demo() -> None:
     assert total_seconds(v) == 5.5
     assert v["shots"][0]["motion"] == "zoom_in" and v["shots"][1]["motion"] == "static"
     assert v["shots"][1]["scene"] == 2
+    dup = validate_plan({"title": "t", "shots": [  # model reused scene 7 -> must renumber unique
+        {"scene": 7, "image_prompt": "a", "voiceover": "", "seconds": 2},
+        {"scene": 7, "image_prompt": "b", "voiceover": "", "seconds": 2}]})
+    assert [s["scene"] for s in dup["shots"]] == [1, 2]
     assert v["title"] == "t" and v["subject"] == ""  # subject defaulted when absent
     miss = validate_plan({"subject": 7, "shots": [  # no title, non-str subject: must not crash render
         {"image_prompt": "a", "voiceover": "", "seconds": 2}]})
