@@ -257,8 +257,10 @@ def _caption_filter(text: str, w: int, h: int, capfile: str) -> str:
         f.write("\n".join(lines))
     fs = max(20, round(h * 0.030))
     esc = lambda p: p.replace("\\", "/").replace(":", r"\:")  # ffmpeg filter path escaping
-    return (f",drawtext=textfile='{esc(capfile)}':fontfile='{esc(font)}':fontsize={fs}:"
-            f"fontcolor=white:borderw={max(2, fs // 12)}:bordercolor=black@0.85:"
+    # expansion=none: the VO is untrusted text — never let a '%{...}' token or a
+    # backslash in a caption get interpreted by drawtext; render it literally.
+    return (f",drawtext=textfile='{esc(capfile)}':fontfile='{esc(font)}':expansion=none:"
+            f"fontsize={fs}:fontcolor=white:borderw={max(2, fs // 12)}:bordercolor=black@0.85:"
             f"x=(w-text_w)/2:y=h-text_h-{round(h * 0.06)}:line_spacing=8")
 
 def build_clip(img: str, sec: float, motion: str, w: int, h: int,
