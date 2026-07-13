@@ -233,7 +233,9 @@ def assemble(clips: list[str], out: str) -> None:
     """Concat re-encoding so mixed audio/no-audio clips join cleanly."""
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
         for c in clips:
-            f.write(f"file '{os.path.abspath(c)}'\n")
+            # forward slashes: '\' is an escape char in ffmpeg's concat format, so a
+            # Windows backslash path fails to open. No-op on Linux (the deploy target).
+            f.write(f"file '{os.path.abspath(c).replace(os.sep, '/')}'\n")
         listfile = f.name
     try:
         _run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", listfile,
