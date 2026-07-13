@@ -1,7 +1,8 @@
 FROM python:3.12-slim
 
-# ffmpeg is the one non-pip dependency the render pipeline needs.
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+# ffmpeg renders; fonts-dejavu-core gives drawtext a font for burned-in captions
+# (the slim image ships none, so captions would silently skip without it).
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

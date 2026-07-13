@@ -41,6 +41,10 @@ python pipeline.py                        # self-check (no API needed)
 python server.py                          # start the MCP server (stdio)
 ```
 Call from any MCP client: `generate_animatic(brief="...", aspect_ratio="9:16", target_seconds=30)`.
+Options: `style` accepts a preset name (`cinematic`, `anime`, `noir`, `watercolor`,
+`claymation`, `storybook`, `3d`) or your own art direction; `captions=True` burns the
+spoken line into each shot (readable on muted autoplay); `voice="..."` picks a TTS voice.
+The result includes a `poster_data_uri` (hero frame) for thumbnails/`og:image`.
 
 ## Repository layout
 ```
@@ -84,8 +88,10 @@ stays stills + Ken Burns; a real-motion tier is blocked upstream, not by us.
 - `VENICE_IMAGE_MODEL` (default `z-image-turbo`; demo used `flux-2-pro`) — trade speed for fidelity.
 - `VENICE_EDIT_MODEL` (default `qwen-image-2-edit`) — the reference/consistency editor.
 - `VENICE_TTS_MODEL` / `VENICE_TTS_VOICE` (default `tts-kokoro` / `af_sky`) — swap for a multilingual voice as needed.
+- `DALANG_FONT` — TTF for caption `drawtext`; defaults to DejaVu (installed in the image) / a system font locally.
 - Ken Burns `zoompan_filter()` — linear ramps; switch to eased curves if motion looks robotic.
-- Next knobs: burned-in captions (drawtext) and a music bed.
+- Caption `_caption_filter()` — fontsize/position are ratios of height; tune if a language runs long.
+- Next knob: a music bed (Venice has no music model yet — needs an asset or another provider).
 
 ## Security
 `.env` is gitignored; never commit the key. Any key that has appeared in a chat

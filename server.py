@@ -43,20 +43,25 @@ def generate_animatic(
     target_seconds: int = 30,
     voiceover: bool = True,
     consistent: bool = True,
+    captions: bool = True,
+    voice: str = "",
     access_key: str = "",
 ) -> dict:
     """Turn a script or idea into a storyboard + narrated animatic video.
 
     Args:
         brief: the script, logline, or idea to visualize.
-        style: visual style for every frame (art direction).
+        style: art direction, or a preset name (cinematic, anime, noir, watercolor,
+            claymation, storybook, 3d) — any other string is used verbatim.
         aspect_ratio: "9:16" | "16:9" | "1:1".
         target_seconds: rough total length (8-90); shot count scales with it up to a cap.
         voiceover: narrate each shot with text-to-speech.
         consistent: keep one recurring subject across shots (hero frame + edits).
+        captions: burn the spoken line into each shot (readable on muted autoplay).
+        voice: TTS voice override (empty -> server default); e.g. a Kokoro voice id.
         access_key: required only if the server sets DALANG_ACCESS_KEY.
 
-    Returns the animatic as a base64 data URI, the shot list, and metadata.
+    Returns the animatic (base64 data URI), a poster frame, the shot list, and metadata.
     On failure returns {"error": ...} instead of raising.
     """
     if ACCESS_KEY and not hmac.compare_digest(access_key, ACCESS_KEY):  # constant-time
@@ -70,13 +75,17 @@ def generate_animatic(
 
     workdir = os.path.join(WORKROOT, uuid.uuid4().hex[:12])
     try:
-        result = render(brief, style, aspect_ratio, target_seconds, voiceover, workdir, consistent)
+        result = render(brief, style, aspect_ratio, target_seconds, voiceover, workdir,
+                        consistent, captions, voice)
         size = os.path.getsize(result["animatic"])
         with open(result["animatic"], "rb") as f:
             video = f.read()
         plan = json.load(open(result["shot_list"], encoding="utf-8"))
         out = {"title": result["title"], "duration_seconds": result["duration_seconds"],
                "animatic_bytes": size, "subject": plan.get("subject", ""), "shots": plan.get("shots", [])}
+        if result.get("frames"):  # hero frame as a poster/thumbnail for sharing (og:image)
+            with open(result["frames"][0], "rb") as pf:
+                out["poster_data_uri"] = "data:image/png;base64," + base64.b64encode(pf.read()).decode()
         # Always embed: a remote A2MCP caller can't read the host FS, and the file is
         # deleted in `finally`, so the data URI is the ONLY delivery channel. Over the
         # cap we still embed (never drop a paid render) and just flag the large payload.

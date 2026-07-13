@@ -6,7 +6,7 @@ non-trivial logic and are exercised by demo() below. The impure steps
 a calibration knob, not clever code. One Venice key powers all three stages.
 """
 from __future__ import annotations
-import base64, hashlib, json, os, subprocess, tempfile, time, urllib.error, urllib.request
+import base64, hashlib, json, os, subprocess, tempfile, textwrap, time, urllib.error, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 # ---------- pure logic (tested by demo()) ----------
@@ -14,6 +14,23 @@ from concurrent.futures import ThreadPoolExecutor
 ASPECTS = {"9:16": (1080, 1920), "16:9": (1920, 1080), "1:1": (1080, 1080)}
 MOTIONS = {"zoom_in", "zoom_out", "pan_left", "pan_right", "static"}
 MAX_SHOTS = 10  # cost guard: refuse runaway shot lists
+
+# Named looks so a caller can pick a vibe without writing art direction. Any string
+# that isn't a preset name passes through unchanged (write your own).
+STYLE_PRESETS = {
+    "cinematic": "cinematic, warm color grade, shallow depth of field",
+    "anime": "anime cel-shaded key art, vibrant, clean linework",
+    "noir": "high-contrast black-and-white film noir, hard shadows, moody",
+    "watercolor": "soft watercolor painting, textured paper, gentle washes",
+    "claymation": "claymation stop-motion, sculpted plasticine, tactile",
+    "storybook": "warm children's storybook illustration, soft and whimsical",
+    "3d": "polished 3D animated film render, soft global illumination",
+}
+
+def resolve_style(style: str) -> str:
+    """Expand a preset name (e.g. 'anime') to full art direction; pass any other
+    string through unchanged."""
+    return STYLE_PRESETS.get((style or "").strip().lower(), style)
 
 def _norm_motion(m: str) -> str:
     """Map a model's free-text motion to a valid token (default static).
@@ -199,12 +216,13 @@ def edit_image(prompt: str, ref_path: str, out_path: str, subject: str = "") -> 
     with open(out_path, "wb") as f:
         f.write(img)
 
-def tts(text: str, out_path: str) -> bool:
-    """Venice TTS (Kokoro). False (silent shot) when the line is empty."""
+def tts(text: str, out_path: str, voice: str = "") -> bool:
+    """Venice TTS (Kokoro). False (silent shot) when the line is empty.
+    `voice` overrides the default per call (empty -> VENICE_TTS_VOICE)."""
     if not text.strip():
         return False
     audio = _venice("/audio/speech", {"model": TTS_MODEL, "input": text,
-                                      "voice": TTS_VOICE, "response_format": "mp3"}, raw=True)
+                                      "voice": voice or TTS_VOICE, "response_format": "mp3"}, raw=True)
     with open(out_path, "wb") as f:
         f.write(audio)
     return True
@@ -214,9 +232,38 @@ def tts(text: str, out_path: str) -> bool:
 def _run(cmd: list[str]) -> None:
     subprocess.run(cmd, check=True, capture_output=True)
 
+def _font_file() -> str | None:
+    """A TTF for drawtext captions. python:3.12-slim ships no fonts, so the Dockerfile
+    installs fonts-dejavu-core; locally fall back to a common system font. Override
+    with DALANG_FONT. Returns None if none found -> captions skip gracefully."""
+    cands = [os.environ.get("DALANG_FONT"),
+             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+             "C:/Windows/Fonts/arialbd.ttf", "C:/Windows/Fonts/arial.ttf"]
+    return next((c for c in cands if c and os.path.exists(c)), None)
+
+def _caption_filter(text: str, w: int, h: int, capfile: str) -> str:
+    """Burn the spoken line in as a bottom-centered caption — social video autoplays
+    muted, so captions are what make it land. A textfile keeps colons/quotes in the
+    caption safe; an outline (not a box) stays cinematic. Returns '' when there's no
+    text or no font on the host — captions are best-effort, never fatal.
+    ponytail: fontsize/position are ratios of h; tune if a language runs long."""
+    text = " ".join((text or "").split())
+    font = _font_file()
+    if not text or not font:
+        return ""
+    lines = textwrap.wrap(text, width=max(16, int(w / (h * 0.026))))[:3]  # cap 3 lines
+    with open(capfile, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    fs = max(20, round(h * 0.030))
+    esc = lambda p: p.replace("\\", "/").replace(":", r"\:")  # ffmpeg filter path escaping
+    return (f",drawtext=textfile='{esc(capfile)}':fontfile='{esc(font)}':fontsize={fs}:"
+            f"fontcolor=white:borderw={max(2, fs // 12)}:bordercolor=black@0.85:"
+            f"x=(w-text_w)/2:y=h-text_h-{round(h * 0.06)}:line_spacing=8")
+
 def build_clip(img: str, sec: float, motion: str, w: int, h: int,
-               audio: str | None, out: str) -> None:
-    vf = zoompan_filter(motion, sec, w, h)
+               audio: str | None, out: str, caption: str = "") -> None:
+    vf = zoompan_filter(motion, sec, w, h) + _caption_filter(caption, w, h, out + ".cap.txt")
     cmd = ["ffmpeg", "-y", "-loop", "1", "-i", img]
     if audio:
         cmd += ["-i", audio]
@@ -245,15 +292,17 @@ def assemble(clips: list[str], out: str) -> None:
         os.unlink(listfile)  # don't leak the concat list in system temp if ffmpeg fails
 
 def render(brief: str, style: str, aspect: str, target_seconds: int, voiceover: bool,
-           workdir: str, consistent: bool = True) -> dict:
+           workdir: str, consistent: bool = True, captions: bool = True, voice: str = "") -> dict:
     """Full pipeline. Returns paths + shot list. Caller (MCP tool) owns pricing.
 
     consistent=True: generate a hero frame, then produce every other frame by
     editing the hero into the new scene, so the subject stays the same across shots.
     consistent=False: each frame is an independent text-to-image (cheaper, less coherent).
+    captions: burn the voiceover line into each shot (bottom-centered).
+    voice: override the TTS voice per render (empty -> VENICE_TTS_VOICE).
     """
     w, h = dims(aspect)
-    plan = breakdown(brief, style, target_seconds)
+    plan = breakdown(brief, resolve_style(style), target_seconds)
     subject = plan.get("subject", "")
     seed = int(hashlib.sha256(plan["title"].encode()).hexdigest(), 16) % 100000  # stable per render
     os.makedirs(workdir, exist_ok=True)
@@ -267,7 +316,7 @@ def render(brief: str, style: str, aspect: str, target_seconds: int, voiceover: 
             return None
         cand = os.path.join(workdir, f"vo_{s['scene']:02d}.mp3")
         try:  # best-effort like frames: a flaky VO -> silent shot, never a failed render
-            return cand if tts(s["voiceover"], cand) else None
+            return cand if tts(s["voiceover"], cand, voice) else None
         except Exception:
             return None
 
@@ -300,7 +349,8 @@ def render(brief: str, style: str, aspect: str, target_seconds: int, voiceover: 
     def do_clip(args):
         s, img, aud = args
         clip = os.path.join(workdir, f"clip_{s['scene']:02d}.mp4")
-        build_clip(img, float(s["seconds"]), s["motion"], w, h, aud, clip)
+        build_clip(img, float(s["seconds"]), s["motion"], w, h, aud, clip,
+                   caption=s["voiceover"] if captions else "")
         return clip
 
     with ThreadPoolExecutor(max_workers=3) as ex:  # a few ffmpeg procs across cores
@@ -335,6 +385,13 @@ def demo() -> None:
     n90, per90 = shot_budget(90)      # long request stays within the cost cap
     assert n90 == MAX_SHOTS and 2 <= per90 <= 6
     assert shot_budget(8)[0] >= 3     # tiny request still gets a few shots
+    assert resolve_style("ANIME ").startswith("anime cel")  # preset name -> art direction
+    assert resolve_style("my own look") == "my own look"    # unknown -> passthrough
+    assert _caption_filter("", 1080, 1920, "unused.txt") == ""  # no text -> no drawtext, no write
+    if _font_file():  # where a font exists, a caption compiles to a drawtext with safe escaping
+        cf = _caption_filter("Colons: and 'quotes' are fine.", 1080, 1920,
+                             os.path.join(tempfile.gettempdir(), "dalang_capcheck.txt"))
+        assert cf.startswith(",drawtext=textfile=") and "fontfile=" in cf, cf
     plan = {"title": "t", "shots": [
         {"scene": 1, "image_prompt": "a", "voiceover": "hi", "seconds": 3, "motion": "zoom in"},
         {"image_prompt": "b", "voiceover": "", "seconds": 2.5},  # no scene/motion -> defaults
