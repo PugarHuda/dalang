@@ -64,8 +64,9 @@ dalang/
 > page**, not the render engine. The engine runs on the MCP/container host.
 
 ## Suggested per-call pricing
-Venice cost/call ≈ LLM (~$0.01) + 4–6 frames (~$0.01/img) + TTS (~$0.005) ≈
-**$0.05–0.08**. Sell at **$0.49/animatic** → healthy margin, cheap for creators.
+Venice cost/call ≈ LLM (~$0.01) + 4–10 frames (~$0.01/img, scales with `target_seconds`,
+capped at 10) + TTS (~$0.005) ≈ **$0.05–0.12**. Sell at **$0.49/animatic** → healthy
+margin, cheap for creators.
 
 ## Character consistency
 `consistent=True` (default) generates one **hero frame**, then produces every other

@@ -3,7 +3,7 @@
 One tool = one billable call. Register this MCP server on OKX.AI in A2MCP mode;
 OKX wraps the pay-per-call settlement (USDT/USDG on X Layer) around it.
 """
-import base64, json, os, shutil, uuid
+import base64, hmac, json, os, shutil, uuid
 from fastmcp import FastMCP
 
 
@@ -51,7 +51,7 @@ def generate_animatic(
         brief: the script, logline, or idea to visualize.
         style: visual style for every frame (art direction).
         aspect_ratio: "9:16" | "16:9" | "1:1".
-        target_seconds: rough total length (8-90).
+        target_seconds: rough total length (8-90); shot count scales with it up to a cap.
         voiceover: narrate each shot with text-to-speech.
         consistent: keep one recurring subject across shots (hero frame + edits).
         access_key: required only if the server sets DALANG_ACCESS_KEY.
@@ -59,7 +59,7 @@ def generate_animatic(
     Returns the animatic as a base64 data URI, the shot list, and metadata.
     On failure returns {"error": ...} instead of raising.
     """
-    if ACCESS_KEY and access_key != ACCESS_KEY:
+    if ACCESS_KEY and not hmac.compare_digest(access_key, ACCESS_KEY):  # constant-time
         return {"error": "unauthorized: valid access_key required"}
     brief = (brief or "").strip()
     if not brief:

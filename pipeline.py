@@ -138,8 +138,19 @@ def _gen_size(w: int, h: int, cap: int = 1280) -> tuple[int, int]:
     k = min(1.0, cap / max(w, h))
     return (max(8, round(w * k / 8) * 8), max(8, round(h * k / 8) * 8))
 
+def shot_budget(target_seconds: int) -> tuple[int, int]:
+    """Turn a requested length into a (shot count, per-shot seconds) the prompt can
+    honour, bounded by MAX_SHOTS (cost guard). Makes target_seconds actually mean
+    something instead of the old hardcoded '4-6 shots × 2-4s' that capped every
+    render near ~24s regardless of the request. Per-shot capped at 6s — a Ken Burns
+    move on a still drags past that."""
+    n = max(3, min(MAX_SHOTS, round(target_seconds / 4)))
+    per = max(2, min(6, round(target_seconds / n)))
+    return n, per
+
 def breakdown(brief: str, style: str, target_seconds: int) -> dict:
     """Script/idea -> shot list, via Venice chat (OpenAI-compatible)."""
+    n_shots, per = shot_budget(target_seconds)
     sys = (
         "You are a film director's assistant. Turn the brief into a shot list for a "
         f"~{target_seconds}s animatic. Return ONLY a JSON object with this shape: "
@@ -152,7 +163,8 @@ def breakdown(brief: str, style: str, target_seconds: int) -> dict:
         f"Total seconds near {target_seconds}. image_prompt: a vivid, self-contained still in "
         f"this style: {style}, <=30 words; do NOT restate the subject, it is added automatically. "
         "voiceover: one short spoken line (<=18 words) or \"\". "
-        "Use EXACTLY these motion tokens. 4-6 shots, each 2-4 seconds. No prose, JSON only."
+        f"Use EXACTLY these motion tokens. About {n_shots} shots, each roughly {per} "
+        f"seconds, summing near {target_seconds}s. No prose, JSON only."
     )
     r = _venice("/chat/completions", {
         "model": LLM_MODEL,
@@ -223,10 +235,12 @@ def assemble(clips: list[str], out: str) -> None:
         for c in clips:
             f.write(f"file '{os.path.abspath(c)}'\n")
         listfile = f.name
-    _run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", listfile,
-          "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "26",
-          "-c:a", "aac", "-movflags", "+faststart", out])  # crf+faststart: smaller, streamable
-    os.unlink(listfile)
+    try:
+        _run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", listfile,
+              "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "26",
+              "-c:a", "aac", "-movflags", "+faststart", out])  # crf+faststart: smaller, streamable
+    finally:
+        os.unlink(listfile)  # don't leak the concat list in system temp if ffmpeg fails
 
 def render(brief: str, style: str, aspect: str, target_seconds: int, voiceover: bool,
            workdir: str, consistent: bool = True) -> dict:
@@ -312,6 +326,10 @@ def demo() -> None:
     assert _norm_motion("slow zoom in") == "zoom_in"
     assert _norm_motion("Pan-Right") == "pan_right"
     assert _norm_motion("dolly") == "static"
+    assert shot_budget(20) == (5, 4)  # demo-scale request
+    n90, per90 = shot_budget(90)      # long request stays within the cost cap
+    assert n90 == MAX_SHOTS and 2 <= per90 <= 6
+    assert shot_budget(8)[0] >= 3     # tiny request still gets a few shots
     plan = {"title": "t", "shots": [
         {"scene": 1, "image_prompt": "a", "voiceover": "hi", "seconds": 3, "motion": "zoom in"},
         {"image_prompt": "b", "voiceover": "", "seconds": 2.5},  # no scene/motion -> defaults
