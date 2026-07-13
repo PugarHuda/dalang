@@ -22,8 +22,8 @@ _load_dotenv()
 from pipeline import render  # imported after .env load
 
 # A remote A2MCP caller can't read the host's filesystem, so we embed the video
-# (and shot list) in the result. Above this size, skip the blob and return the
-# path only (host a file server / object storage for large outputs — see DEPLOY.md).
+# in the result. Above this size we still embed (a paid render is never dropped)
+# but flag it — bump the cap or host object storage for very large outputs.
 MAX_INLINE_BYTES = int(os.environ.get("DALANG_MAX_INLINE_BYTES", 8_000_000))
 
 mcp = FastMCP("dalang")
@@ -77,10 +77,12 @@ def generate_animatic(
         plan = json.load(open(result["shot_list"], encoding="utf-8"))
         out = {"title": result["title"], "duration_seconds": result["duration_seconds"],
                "animatic_bytes": size, "subject": plan.get("subject", ""), "shots": plan.get("shots", [])}
-        if size <= MAX_INLINE_BYTES:  # embed so a remote caller can actually use it
-            out["animatic_data_uri"] = "data:video/mp4;base64," + base64.b64encode(video).decode()
-        else:
-            out["warning"] = f"animatic {size} bytes exceeds inline cap ({MAX_INLINE_BYTES}); host object storage"
+        # Always embed: a remote A2MCP caller can't read the host FS, and the file is
+        # deleted in `finally`, so the data URI is the ONLY delivery channel. Over the
+        # cap we still embed (never drop a paid render) and just flag the large payload.
+        out["animatic_data_uri"] = "data:video/mp4;base64," + base64.b64encode(video).decode()
+        if size > MAX_INLINE_BYTES:
+            out["warning"] = f"animatic {size} bytes exceeds inline cap ({MAX_INLINE_BYTES}); large payload"
         if KEEP_FILES:  # local debugging keeps the files + paths
             out.update({k: result[k] for k in ("animatic", "frames", "shot_list")})
         return out
