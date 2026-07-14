@@ -51,6 +51,9 @@ def generate_animatic(
     consistent: bool = True,
     captions: bool = True,
     voice: str = "",
+    language: str = "",
+    template: str = "",
+    shot_list: dict | None = None,
     access_key: str = "",
 ) -> dict:
     """Turn a script or idea into a storyboard + narrated animatic video.
@@ -65,16 +68,22 @@ def generate_animatic(
         consistent: keep one recurring subject across shots (hero frame + edits).
         captions: burn the spoken line into each shot (readable on muted autoplay).
         voice: TTS voice override (empty -> server default); e.g. a Kokoro voice id.
+        language: write the title/voiceover in this language (e.g. "Bahasa Indonesia").
+            Non-Latin scripts (CJK/Arabic) need a matching caption font via DALANG_FONT.
+        template: a vertical structure preset — product_ad, book_trailer, recipe_reel,
+            real_estate, event_promo, explainer.
+        shot_list: a ready-made storyboard (same JSON shape the tool returns) to render
+            directly, skipping the LLM — for agents that own the storyboard step.
         access_key: required only if the server sets DALANG_ACCESS_KEY.
 
-    Returns the animatic (base64 data URI), a poster frame, the shot list, and metadata.
-    On failure returns {"error": ...} instead of raising.
+    Returns the animatic (base64 data URI), a poster frame, an SRT subtitle track,
+    the shot list, and metadata. On failure returns {"error": ...} instead of raising.
     """
     if ACCESS_KEY and not hmac.compare_digest(access_key, ACCESS_KEY):  # constant-time
         return {"error": "unauthorized: valid access_key required"}
     brief = (brief or "").strip()
-    if not brief:
-        return {"error": "brief is required"}
+    if not brief and not shot_list:  # one of the two must drive the render
+        return {"error": "brief is required (or pass a shot_list)"}
     if aspect_ratio not in VALID_ASPECTS:
         return {"error": f"aspect_ratio must be one of {list(VALID_ASPECTS)}"}
 
@@ -82,13 +91,14 @@ def generate_animatic(
     try:
         target_seconds = max(8, min(90, int(target_seconds)))  # inside try: a bad value
         result = render(brief, style, aspect_ratio, target_seconds, voiceover, workdir,  # returns {error}, never raises
-                        consistent, captions, voice)
+                        consistent, captions, voice, language, template, shot_list)
         size = os.path.getsize(result["animatic"])
         with open(result["animatic"], "rb") as f:
             video = f.read()
         plan = json.load(open(result["shot_list"], encoding="utf-8"))
         out = {"title": result["title"], "duration_seconds": result["duration_seconds"],
-               "animatic_bytes": size, "subject": plan.get("subject", ""), "shots": plan.get("shots", [])}
+               "animatic_bytes": size, "subject": plan.get("subject", ""), "shots": plan.get("shots", []),
+               "srt": result.get("srt", "")}  # editable soft-subs alongside the burned-in captions
         if result.get("frames"):  # hero frame as a poster/thumbnail for sharing (og:image)
             with open(result["frames"][0], "rb") as pf:
                 out["poster_data_uri"] = "data:image/png;base64," + base64.b64encode(pf.read()).decode()

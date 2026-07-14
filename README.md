@@ -42,9 +42,17 @@ python server.py                          # start the MCP server (stdio)
 ```
 Call from any MCP client: `generate_animatic(brief="...", aspect_ratio="9:16", target_seconds=30)`.
 Options: `style` accepts a preset name (`cinematic`, `anime`, `noir`, `watercolor`,
-`claymation`, `storybook`, `3d`) or your own art direction; `captions=True` burns the
-spoken line into each shot (readable on muted autoplay); `voice="..."` picks a TTS voice.
-The result includes a `poster_data_uri` (hero frame) for thumbnails/`og:image`.
+`claymation`, `storybook`, `3d`) or your own art direction; `template` picks a vertical
+structure (`product_ad`, `book_trailer`, `recipe_reel`, `real_estate`, `event_promo`,
+`explainer`); `captions=True` burns the spoken line into each shot (readable on muted
+autoplay); `voice="..."` picks a TTS voice; `language="Bahasa Indonesia"` writes the
+title/voiceover in another language (non-Latin scripts need a caption font via `DALANG_FONT`).
+The result includes a `poster_data_uri` (hero frame) for thumbnails/`og:image` and an
+`srt` subtitle track (editable soft-subs) alongside the burned-in captions.
+
+**Agent composability:** pass a ready-made `shot_list` (the same JSON the tool returns)
+to render it directly and skip the LLM — so an upstream "director" agent can own the
+storyboard and call DALANG purely as the render primitive.
 
 ## Repository layout
 ```

@@ -32,6 +32,22 @@ def resolve_style(style: str) -> str:
     string through unchanged."""
     return STYLE_PRESETS.get((style or "").strip().lower(), style)
 
+# Vertical recipes: a named structure prepended to the brief so a buyer gets a
+# usable ad/trailer/reel without describing the arc themselves. Combine with any style.
+TEMPLATES = {
+    "product_ad": "Structure as a product ad: hook, the problem, the product reveal, a key benefit, and a call to action.",
+    "book_trailer": "Structure as a cinematic book trailer: mood, the stakes, a glimpse of the hero, the central conflict, and a title-card ending.",
+    "recipe_reel": "Structure as a fast recipe reel: the finished dish hero, key ingredients, two or three prep/cook beats, and the final plated result.",
+    "real_estate": "Structure as a property tour: exterior approach, the entry, the main living space, a standout feature, and a lifestyle closing shot.",
+    "event_promo": "Structure as an event promo: an energy hook, the what/when/where, a highlight moment, and a 'get your tickets' call to action.",
+    "explainer": "Structure as a short explainer: the problem, a simple analogy, how it works in two or three beats, and the takeaway.",
+}
+
+def apply_template(brief: str, template: str) -> str:
+    """Prepend a named vertical structure to the brief; unknown/empty -> unchanged."""
+    hint = TEMPLATES.get((template or "").strip().lower())
+    return f"{hint}\n\n{brief}" if hint else brief
+
 def _norm_motion(m: str) -> str:
     """Map a model's free-text motion to a valid token (default static).
     Fixes gap: models return e.g. 'slow zoom in' -> was silently dropped."""
@@ -105,6 +121,27 @@ def validate_plan(plan: dict) -> dict:
 def total_seconds(plan: dict) -> float:
     return round(sum(float(s["seconds"]) for s in plan["shots"]), 2)
 
+def _srt_time(t: float) -> str:
+    ms = round(t * 1000)
+    h, ms = divmod(ms, 3_600_000)
+    m, ms = divmod(ms, 60_000)
+    s, ms = divmod(ms, 1_000)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+def build_srt(plan: dict) -> str:
+    """SRT soft-subs from the shot list — editable captions to complement the burned-in
+    ones. Timing uses max(sec,0.5) to match the actual clip length; silent shots advance
+    the clock but emit no cue."""
+    out, t, n = [], 0.0, 0
+    for s in plan["shots"]:
+        dur = max(float(s["seconds"]), 0.5)
+        text = " ".join(str(s.get("voiceover", "")).split())
+        if text:
+            n += 1
+            out.append(f"{n}\n{_srt_time(t)} --> {_srt_time(t + dur)}\n{text}\n")
+        t += dur
+    return "\n".join(out)
+
 # ---------- Venice provider (LLM + image + TTS, one key) ----------
 
 VENICE_BASE = os.environ.get("VENICE_BASE_URL", "https://api.venice.ai/api/v1")
@@ -165,9 +202,11 @@ def shot_budget(target_seconds: int) -> tuple[int, int]:
     per = max(2, min(6, round(target_seconds / n)))
     return n, per
 
-def breakdown(brief: str, style: str, target_seconds: int) -> dict:
-    """Script/idea -> shot list, via Venice chat (OpenAI-compatible)."""
+def breakdown(brief: str, style: str, target_seconds: int, language: str = "") -> dict:
+    """Script/idea -> shot list, via Venice chat (OpenAI-compatible).
+    language: write the title/voiceover in this language (empty -> the brief's)."""
     n_shots, per = shot_budget(target_seconds)
+    lang = f" Write the title and every voiceover line in {language}." if language.strip() else ""
     sys = (
         "You are a film director's assistant. Turn the brief into a shot list for a "
         f"~{target_seconds}s animatic. Return ONLY a JSON object with this shape: "
@@ -181,7 +220,7 @@ def breakdown(brief: str, style: str, target_seconds: int) -> dict:
         f"this style: {style}, <=30 words; do NOT restate the subject, it is added automatically. "
         "voiceover: one short spoken line (<=18 words) or \"\". "
         f"Use EXACTLY these motion tokens. About {n_shots} shots, each roughly {per} "
-        f"seconds, summing near {target_seconds}s. No prose, JSON only."
+        f"seconds, summing near {target_seconds}s. No prose, JSON only." + lang
     )
     r = _venice("/chat/completions", {
         "model": LLM_MODEL,
@@ -294,7 +333,8 @@ def assemble(clips: list[str], out: str) -> None:
         os.unlink(listfile)  # don't leak the concat list in system temp if ffmpeg fails
 
 def render(brief: str, style: str, aspect: str, target_seconds: int, voiceover: bool,
-           workdir: str, consistent: bool = True, captions: bool = True, voice: str = "") -> dict:
+           workdir: str, consistent: bool = True, captions: bool = True, voice: str = "",
+           language: str = "", template: str = "", shot_list: dict | None = None) -> dict:
     """Full pipeline. Returns paths + shot list. Caller (MCP tool) owns pricing.
 
     consistent=True: generate a hero frame, then produce every other frame by
@@ -302,9 +342,15 @@ def render(brief: str, style: str, aspect: str, target_seconds: int, voiceover: 
     consistent=False: each frame is an independent text-to-image (cheaper, less coherent).
     captions: burn the voiceover line into each shot (bottom-centered).
     voice: override the TTS voice per render (empty -> VENICE_TTS_VOICE).
+    language: write title/voiceover in this language (ignored if shot_list is given).
+    template: prepend a vertical structure (see TEMPLATES) to the brief.
+    shot_list: render this ready-made plan directly and skip the LLM breakdown —
+        lets an upstream 'director' agent own the storyboard (agent composability).
     """
     w, h = dims(aspect)
-    plan = breakdown(brief, resolve_style(style), target_seconds)
+    plan = (validate_plan(shot_list) if shot_list
+            else breakdown(apply_template(brief, template), resolve_style(style),
+                           target_seconds, language))
     subject = plan.get("subject", "")
     seed = int(hashlib.sha256(plan["title"].encode()).hexdigest(), 16) % 100000  # stable per render
     os.makedirs(workdir, exist_ok=True)
@@ -363,7 +409,8 @@ def render(brief: str, style: str, aspect: str, target_seconds: int, voiceover: 
     with open(shotlist, "w") as f:
         json.dump(plan, f, indent=2)
     return {"title": plan["title"], "animatic": animatic, "frames": frames,
-            "shot_list": shotlist, "duration_seconds": total_seconds(plan)}
+            "shot_list": shotlist, "duration_seconds": total_seconds(plan),
+            "srt": build_srt(plan)}
 
 # ---------- self-check (no network / no ffmpeg needed) ----------
 
@@ -389,6 +436,15 @@ def demo() -> None:
     assert shot_budget(8)[0] >= 3     # tiny request still gets a few shots
     assert resolve_style("ANIME ").startswith("anime cel")  # preset name -> art direction
     assert resolve_style("my own look") == "my own look"    # unknown -> passthrough
+    assert apply_template("my brief", "product_ad").endswith("my brief") and "call to action" in apply_template("x", "product_ad")
+    assert apply_template("my brief", "nope") == "my brief"  # unknown template -> passthrough
+    srt = build_srt({"shots": [                              # cumulative timing, silent shot skipped
+        {"voiceover": "First line.", "seconds": 3},
+        {"voiceover": "", "seconds": 2},
+        {"voiceover": "Third line.", "seconds": 2.5}]})
+    assert "1\n00:00:00,000 --> 00:00:03,000\nFirst line." in srt
+    assert "2\n00:00:05,000 --> 00:00:07,500\nThird line." in srt  # 3+2 silent -> starts at 5s
+    assert _srt_time(3661.5) == "01:01:01,500"
     assert _caption_filter("", 1080, 1920, "unused.txt") == ""  # no text -> no drawtext, no write
     if _font_file():  # where a font exists, a caption compiles to a drawtext with safe escaping
         cf = _caption_filter("Colons: and 'quotes' are fine.", 1080, 1920,
