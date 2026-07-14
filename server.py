@@ -13,9 +13,15 @@ def _load_dotenv(path: str = ".env") -> None:
     if os.path.exists(path):
         for line in open(path, encoding="utf-8"):
             line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, v = line.split("=", 1)
-                os.environ.setdefault(k.strip(), v.strip())
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            if line.startswith("export "):  # tolerate copied shell-style lines
+                line = line[7:]
+            k, v = line.split("=", 1)
+            v = v.strip()
+            if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":  # strip wrapping quotes,
+                v = v[1:-1]                                        # else the key carries them -> 401
+            os.environ.setdefault(k.strip(), v)
 
 
 _load_dotenv()
