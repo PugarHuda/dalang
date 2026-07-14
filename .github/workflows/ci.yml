@@ -10,7 +10,11 @@ jobs:
           python-version: "3.12"
       - name: Pipeline self-check (pure logic, no API/ffmpeg)
         run: python pipeline.py
-      - name: Import server (deps installed)
+      - name: Install deps + ffmpeg
         run: |
           pip install -r requirements.txt
-          python -c "import server; print('server imports ok')"
+          sudo apt-get update && sudo apt-get install -y ffmpeg fonts-dejavu-core
+      - name: Import server
+        run: python -c "import server; print('server imports ok')"
+      - name: Integration test (real ffmpeg, stubbed Venice — no API key)
+        run: python test_render.py
