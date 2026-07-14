@@ -71,11 +71,11 @@ def generate_animatic(
         return {"error": "brief is required"}
     if aspect_ratio not in VALID_ASPECTS:
         return {"error": f"aspect_ratio must be one of {list(VALID_ASPECTS)}"}
-    target_seconds = max(8, min(90, int(target_seconds)))  # cost guard
 
     workdir = os.path.join(WORKROOT, uuid.uuid4().hex[:12])
     try:
-        result = render(brief, style, aspect_ratio, target_seconds, voiceover, workdir,
+        target_seconds = max(8, min(90, int(target_seconds)))  # inside try: a bad value
+        result = render(brief, style, aspect_ratio, target_seconds, voiceover, workdir,  # returns {error}, never raises
                         consistent, captions, voice)
         size = os.path.getsize(result["animatic"])
         with open(result["animatic"], "rb") as f:
