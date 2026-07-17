@@ -5,3 +5,4 @@ __pycache__/
 .vercel/
 web/.vercel/
 web/demo.mp4
+web/gallery/*.mp4

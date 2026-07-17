@@ -38,6 +38,9 @@
   .phone{justify-self:center;width:300px;max-width:80vw;border:10px solid #000;border-radius:36px;
     box-shadow:0 30px 80px rgba(0,0,0,.6),0 0 0 1px var(--line);overflow:hidden;background:#000;aspect-ratio:9/16}
   .phone video{width:100%;height:100%;display:block;object-fit:cover}
+  .gv{width:100%;aspect-ratio:9/16;border-radius:14px;background:#000;display:block;object-fit:cover;border:1px solid var(--line)}
+  .badge{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.06em;color:#1a1206;
+    background:linear-gradient(90deg,var(--gold),var(--gold2));border-radius:999px;padding:3px 9px;margin-bottom:8px}
   .kicker{color:var(--gold);font-weight:700;letter-spacing:.12em;font-size:12px;text-transform:uppercase}
   section{padding:40px 0;border-top:1px solid var(--line)}
   h2{font-size:clamp(24px,4vw,32px);margin:6px 0 20px}
@@ -95,6 +98,39 @@
     <div class="flow">brief ─► LLM (shot list) ─┬─► image (frame) ──┐
                           ├─► TTS (voiceover) ─┼─► Ken Burns (ffmpeg) ─► animatic.mp4
                           └────────────────────┘</div>
+  </section>
+
+  <section id="gallery">
+    <div class="kicker">Range</div>
+    <h2>One tool, every look — and now real motion</h2>
+    <p style="color:var(--muted);max-width:60ch;margin-top:0">Same API call, different art direction, aspect, language, and render engine. Every clip below was generated end-to-end from a single line of brief.</p>
+    <div style="height:18px"></div>
+    <div class="grid g4">
+      <div class="card">
+        <span class="badge">CINEMATIC · real motion</span>
+        <video class="gv" src="gallery/cinematic-noodle-chef.mp4" autoplay muted loop playsinline></video>
+        <h3 style="margin:12px 0 4px">Midnight Noodle Chef</h3>
+        <p>Image-to-video tier — actual motion, not pan/zoom.</p>
+      </div>
+      <div class="card">
+        <span class="tag">anime</span>
+        <video class="gv" src="gallery/bookstore-anime.mp4" autoplay muted loop playsinline></video>
+        <h3 style="margin:12px 0 4px">The Midnight Bookshop</h3>
+        <p>Style preset, character consistency across shots.</p>
+      </div>
+      <div class="card">
+        <span class="tag">noir</span>
+        <video class="gv" src="gallery/detective-noir.mp4" autoplay muted loop playsinline></video>
+        <h3 style="margin:12px 0 4px">The Red Umbrella</h3>
+        <p>Moody grade + burned-in captions for muted autoplay.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Bahasa Indonesia</span>
+        <video class="gv" src="gallery/kopi-nusantara.mp4" autoplay muted loop playsinline></video>
+        <h3 style="margin:12px 0 4px">Kopi Gayo</h3>
+        <p>Multilingual narration + captions, out of the box.</p>
+      </div>
+    </div>
   </section>
 
   <section>
