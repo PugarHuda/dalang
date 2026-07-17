@@ -25,6 +25,7 @@ def _load_dotenv(path: str = ".env") -> None:
 
 
 _load_dotenv()
+import x402  # x402/X Layer paid-endpoint gate (opt-in via DALANG_X402_PAYTO)
 from pipeline import render  # imported after .env load
 
 # A remote A2MCP caller can't read the host's filesystem, so we embed the video
@@ -123,7 +124,14 @@ def generate_animatic(
 
 if __name__ == "__main__":
     port = os.environ.get("PORT")  # container hosts (Railway/Render/Fly) set PORT
-    if port:
+    if port and x402.enabled():
+        # Native x402 paid endpoint: wrap /mcp so the paid tools/call requires an
+        # on-chain payment (USDT/USDG on X Layer via APP); handshake/list stay free.
+        import uvicorn
+        app = mcp.http_app()
+        app.add_middleware(x402.X402Middleware)
+        uvicorn.run(app, host="0.0.0.0", port=int(port))
+    elif port:
         mcp.run(transport="http", host="0.0.0.0", port=int(port))
     else:
         mcp.run()  # stdio for local MCP clients (Claude/Cursor)

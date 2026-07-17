@@ -54,11 +54,24 @@ The result includes a `poster_data_uri` (hero frame) for thumbnails/`og:image` a
 to render it directly and skip the LLM — so an upstream "director" agent can own the
 storyboard and call DALANG purely as the render primitive.
 
+## Native x402 payments on X Layer (OKX A2MCP)
+OKX A2MCP settles pay-per-call as an **x402** flow on **X Layer** (USDT/USDG via the
+Agent Payments Protocol). DALANG speaks it natively: set `DALANG_X402_PAYTO` (your X
+Layer wallet) and the paid `tools/call` answers **HTTP 402** with x402 payment
+requirements until the caller pays — the handshake and `tools/list` stay free. Payment
+is verified/settled by a configured **facilitator** (`DALANG_X402_FACILITATOR`), so no
+private key ever touches this server. Off by default (unset → the free / access_key flow
+is unchanged). See `x402.py` + `test_x402.py`. This is the piece that only works inside
+OKX's ecosystem — the render engine is portable, the *on-chain metered billing* is not.
+
 ## Repository layout
 ```
 dalang/
 ├── pipeline.py     # script → shot list → frames → voiceover → animatic (+ self-check)
 ├── server.py       # FastMCP server; one tool = one pay-per-call
+├── x402.py         # x402 / X Layer paid-endpoint gate (OKX A2MCP), opt-in
+├── test_render.py  # offline integration test (real ffmpeg, stubbed Venice)
+├── test_x402.py    # x402 payment-gate test (pure)
 ├── web/            # landing page (deployed to Vercel), embeds the demo video
 ├── requirements.txt
 ├── .env.example

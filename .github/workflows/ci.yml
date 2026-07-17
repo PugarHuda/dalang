@@ -16,5 +16,7 @@ jobs:
           sudo apt-get update && sudo apt-get install -y ffmpeg fonts-dejavu-core
       - name: Import server
         run: python -c "import server; print('server imports ok')"
+      - name: x402 payment-gate test (pure)
+        run: python test_x402.py
       - name: Integration test (real ffmpeg, stubbed Venice — no API key)
         run: python test_render.py
