@@ -150,6 +150,13 @@ IMAGE_MODEL = os.environ.get("VENICE_IMAGE_MODEL", "z-image-turbo")
 EDIT_MODEL = os.environ.get("VENICE_EDIT_MODEL", "qwen-image-2-edit")  # reliable editor (fast lite models refuse people)
 TTS_MODEL = os.environ.get("VENICE_TTS_MODEL", "tts-kokoro")
 TTS_VOICE = os.environ.get("VENICE_TTS_VOICE", "af_sky")
+# Cinematic tier: animate each still into real motion via Venice's video queue
+# (image-to-video). PREMIUM — ~$0.55/clip, so it's opt-in and shot-capped.
+VIDEO_MODEL = os.environ.get("VENICE_VIDEO_MODEL", "wan-2-7-image-to-video")
+VIDEO_RES = os.environ.get("VENICE_VIDEO_RESOLUTION", "720p")
+VIDEO_DURATION = os.environ.get("VENICE_VIDEO_DURATION", "5s")  # wan: 5s|10s|15s
+VID_SECS = float(VIDEO_DURATION.rstrip("s"))
+MAX_VIDEO_SHOTS = int(os.environ.get("DALANG_MAX_VIDEO_SHOTS", 6))  # cost guard
 
 _RETRYABLE = {408, 409, 429, 500, 502, 503, 504}
 
@@ -266,6 +273,52 @@ def tts(text: str, out_path: str, voice: str = "") -> bool:
         f.write(audio)
     return True
 
+# ---------- cinematic tier: image-to-video (Venice async video queue) ----------
+
+_MOTION_PHRASE = {
+    "zoom_in": "slow cinematic push-in", "zoom_out": "slow pull-back reveal",
+    "pan_left": "smooth pan left", "pan_right": "smooth pan right",
+    "static": "locked-off camera, subtle ambient motion",
+}
+
+def video_quote(model: str = "", duration: str = "", resolution: str = "") -> float:
+    """USD price for ONE image-to-video clip, no generation — for cost display/guards."""
+    r = _venice("/video/quote", {"model": model or VIDEO_MODEL,
+                                 "duration": duration or VIDEO_DURATION,
+                                 "resolution": resolution or VIDEO_RES})
+    return float(r.get("quote", 0))
+
+def gen_video(frame_path: str, image_prompt: str, motion: str, out_path: str,
+              poll_every: int = 5, max_wait: int = 600) -> None:
+    """Animate a still into a real-motion clip (Venice image-to-video, async queue).
+    PREMIUM ~$0.55/clip. queue -> poll /video/retrieve -> save mp4. Raises on failure.
+    No aspect_ratio is sent — wan derives it from the source image."""
+    b64 = "data:image/png;base64," + base64.b64encode(open(frame_path, "rb").read()).decode()
+    prompt = f"{image_prompt}. Camera: {_MOTION_PHRASE.get(motion, _MOTION_PHRASE['static'])}. Subtle lifelike motion."
+    q = _venice("/video/queue", {"model": VIDEO_MODEL, "prompt": prompt, "image_url": b64,
+                                 "duration": VIDEO_DURATION, "resolution": VIDEO_RES})
+    qid = q["queue_id"]
+    waited = 0
+    while waited < max_wait:
+        raw = _venice("/video/retrieve", {"model": VIDEO_MODEL, "queue_id": qid}, raw=True)
+        if b"ftyp" in raw[:64]:  # the mp4 bytes came back inline
+            with open(out_path, "wb") as f:
+                f.write(raw)
+            return
+        try:
+            body = json.loads(raw)
+        except Exception:
+            body = {}
+        if body.get("status") == "COMPLETED":  # fetch from the private-share URL
+            req = urllib.request.Request(body["download_url"],
+                                         headers={"Authorization": f"Bearer {os.environ['VENICE_API_KEY']}"})
+            with urllib.request.urlopen(req, timeout=180) as r, open(out_path, "wb") as f:
+                f.write(r.read())
+            return
+        time.sleep(poll_every)
+        waited += poll_every
+    raise RuntimeError(f"video generation timed out after {max_wait}s")
+
 # ---------- ffmpeg assembly ----------
 
 def _run(cmd: list[str]) -> None:
@@ -317,6 +370,27 @@ def build_clip(img: str, sec: float, motion: str, w: int, h: int,
     cmd += [out]
     _run(cmd)
 
+def build_clip_from_video(video_in: str, w: int, h: int, audio: str | None,
+                          out: str, caption: str = "") -> None:
+    """Cinematic tier: fit a generated motion clip to the WxH canvas (same blurred
+    cover-fill as the stills path, no crop) + burned-in caption. Uses narration `audio`
+    when given, else the clip's own soundtrack. Trimmed to VID_SECS so the timeline
+    matches the shot list (short narration -> trailing silence, like the stills path)."""
+    long = max(w, h)
+    vf = (f"scale={long}:{long}:force_original_aspect_ratio=decrease,split=2[bg][fg];"
+          f"[bg]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},"
+          f"boxblur=24:2,eq=brightness=-0.18:saturation=1.15[bg];"
+          f"[fg]scale={w}:{h}:force_original_aspect_ratio=decrease[fg];"
+          f"[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1,format=yuv420p"
+          + _caption_filter(caption, w, h, out + ".cap.txt"))
+    cmd = ["ffmpeg", "-y", "-i", video_in]
+    if audio:  # replace the clip's own audio with the narration track
+        cmd += ["-i", audio, "-map", "0:v", "-map", "1:a"]
+    cmd += ["-t", str(VID_SECS), "-vf", vf, "-r", "30",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "26",
+            "-c:a", "aac", out]
+    _run(cmd)
+
 def assemble(clips: list[str], out: str) -> None:
     """Concat re-encoding so mixed audio/no-audio clips join cleanly."""
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
@@ -334,7 +408,8 @@ def assemble(clips: list[str], out: str) -> None:
 
 def render(brief: str, style: str, aspect: str, target_seconds: int, voiceover: bool,
            workdir: str, consistent: bool = True, captions: bool = True, voice: str = "",
-           language: str = "", template: str = "", shot_list: dict | None = None) -> dict:
+           language: str = "", template: str = "", shot_list: dict | None = None,
+           motion_engine: str = "kenburns") -> dict:
     """Full pipeline. Returns paths + shot list. Caller (MCP tool) owns pricing.
 
     consistent=True: generate a hero frame, then produce every other frame by
@@ -346,11 +421,19 @@ def render(brief: str, style: str, aspect: str, target_seconds: int, voiceover: 
     template: prepend a vertical structure (see TEMPLATES) to the brief.
     shot_list: render this ready-made plan directly and skip the LLM breakdown —
         lets an upstream 'director' agent own the storyboard (agent composability).
+    motion_engine: "kenburns" (default, stills + Ken Burns) or "video" (PREMIUM —
+        animate each still into real motion via image-to-video, ~$0.55/shot).
     """
     w, h = dims(aspect)
     plan = (validate_plan(shot_list) if shot_list
             else breakdown(apply_template(brief, template), resolve_style(style),
                            target_seconds, language))
+    cinematic = motion_engine == "video"
+    if cinematic and len(plan["shots"]) > MAX_VIDEO_SHOTS:  # cost guard: video is ~$0.55/shot
+        plan["shots"] = plan["shots"][:MAX_VIDEO_SHOTS]
+    if cinematic:  # each clip is a fixed-length motion shot; keep the shot list honest
+        for s in plan["shots"]:
+            s["seconds"] = VID_SECS
     subject = plan.get("subject", "")
     seed = int(hashlib.sha256(plan["title"].encode()).hexdigest(), 16) % 100000  # stable per render
     os.makedirs(workdir, exist_ok=True)
@@ -397,11 +480,20 @@ def render(brief: str, style: str, aspect: str, target_seconds: int, voiceover: 
     def do_clip(args):
         s, img, aud = args
         clip = os.path.join(workdir, f"clip_{s['scene']:02d}.mp4")
-        build_clip(img, float(s["seconds"]), s["motion"], w, h, aud, clip,
-                   caption=s["voiceover"] if captions else "")
+        cap = s["voiceover"] if captions else ""
+        if cinematic:
+            motion_mp4 = os.path.join(workdir, f"motion_{s['scene']:02d}.mp4")
+            try:  # best-effort: a video failure falls back to Ken Burns on the still
+                gen_video(img, s["image_prompt"], s["motion"], motion_mp4)
+                build_clip_from_video(motion_mp4, w, h, aud, clip, caption=cap)
+                return clip
+            except Exception:
+                pass
+        build_clip(img, float(s["seconds"]), s["motion"], w, h, aud, clip, caption=cap)
         return clip
 
-    with ThreadPoolExecutor(max_workers=3) as ex:  # a few ffmpeg procs across cores
+    # video clips run on Venice's queue (I/O-bound), so a wider pool is fine there
+    with ThreadPoolExecutor(max_workers=6 if cinematic else 3) as ex:
         clips = list(ex.map(do_clip, zip(shots, frames, auds)))
     animatic = os.path.join(workdir, "animatic.mp4")
     assemble(clips, animatic)

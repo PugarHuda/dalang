@@ -90,6 +90,25 @@ def main():
     check("captions=False renders", os.path.exists(res["animatic"]))
     shutil.rmtree(d, ignore_errors=True)
 
+    print("\n== cinematic tier (motion_engine=video, stubbed gen_video) ==")
+    def fake_video(frame, image_prompt, motion, out, **kw):  # real dummy motion clip, no API
+        subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=s=720x1280:d=5:r=30",
+                        "-f", "lavfi", "-i", "sine=frequency=220:duration=5", "-shortest",
+                        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", out],
+                       check=True, capture_output=True)
+    pipeline.gen_video = fake_video
+    res, d = render_tmp(aspect="9:16", target=20, captions=True, motion_engine="video")
+    v = _probe(res["animatic"], "stream=width,height")
+    check("video tier: canvas 1080x1920", (v["width"], v["height"]) == (1080, 1920))
+    check("video tier: has video+audio", set(_stream_types(res["animatic"])) >= {"video", "audio"})
+    check("video tier: srt uses 5s shots", "00:00:05,000" in res["srt"])
+    shutil.rmtree(d, ignore_errors=True)
+    def video_boom(*a, **k): raise RuntimeError("video queue 500")
+    pipeline.gen_video = video_boom
+    res, d = render_tmp(aspect="9:16", target=20, motion_engine="video")  # must fall back to Ken Burns
+    check("video failure -> Ken Burns fallback, render survives", os.path.exists(res["animatic"]))
+    shutil.rmtree(d, ignore_errors=True)
+
     print("\n== best-effort resilience ==")
     def boom(*a, **k): raise RuntimeError("venice down")
     pipeline.tts = boom

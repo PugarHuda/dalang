@@ -86,10 +86,18 @@ frame by **editing the hero into the new scene** (Venice `/image/edit`), so the 
 subject — e.g. "Liam, a bearded barista in a cream apron" — recurs across shots.
 `consistent=False` makes each frame an independent text-to-image (cheaper, less coherent).
 
-## Not built: native-video "cinematic tier"
-Venice lists Kling/Veo/LTX video models, but they are **not exposed on the inference
-API** (all video endpoints 404; `wan-2-7-image-to-video` → "model not found"). So DALANG
-stays stills + Ken Burns; a real-motion tier is blocked upstream, not by us.
+## Cinematic tier — real motion (`cinematic=True`)
+Two render engines:
+- **Ken Burns** (default) — stills + blurred-reframe pan/zoom. ~$0.05–0.12/animatic, ~60–80s.
+- **Cinematic** (`cinematic=True`) — each shot's frame is animated into a real-motion
+  clip via Venice **image-to-video** (`/video/queue` → poll `/video/retrieve`, default
+  `wan-2-7-image-to-video`, 5s/720p), then reframed to the canvas with captions +
+  narration. **PREMIUM: ~$0.55/shot** (a 5-shot clip ≈ $2.75), so it's opt-in and
+  capped at `DALANG_MAX_VIDEO_SHOTS` (default 6). A single video failure falls back to
+  Ken Burns for that shot, so the render never dies. Price this tier accordingly.
+
+Venice exposed 90+ text/image-to-video models (Wan, Kling, Veo, LTX, …) — pick one via
+`VENICE_VIDEO_MODEL`. (Earlier the video endpoints 404'd; that block has since lifted.)
 
 ## Calibration knobs (env — ponytail)
 - `VENICE_LLM_MODEL` (default `qwen3-235b-a22b-instruct-2507`) — clean, strong JSON.

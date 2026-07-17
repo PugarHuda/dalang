@@ -54,6 +54,7 @@ def generate_animatic(
     language: str = "",
     template: str = "",
     shot_list: dict | None = None,
+    cinematic: bool = False,
     access_key: str = "",
 ) -> dict:
     """Turn a script or idea into a storyboard + narrated animatic video.
@@ -74,6 +75,8 @@ def generate_animatic(
             real_estate, event_promo, explainer.
         shot_list: a ready-made storyboard (same JSON shape the tool returns) to render
             directly, skipping the LLM — for agents that own the storyboard step.
+        cinematic: PREMIUM real-motion tier — animate each shot with image-to-video
+            (~$0.55/shot) instead of stills + Ken Burns. Price this call accordingly.
         access_key: required only if the server sets DALANG_ACCESS_KEY.
 
     Returns the animatic (base64 data URI), a poster frame, an SRT subtitle track,
@@ -91,7 +94,8 @@ def generate_animatic(
     try:
         target_seconds = max(8, min(90, int(target_seconds)))  # inside try: a bad value
         result = render(brief, style, aspect_ratio, target_seconds, voiceover, workdir,  # returns {error}, never raises
-                        consistent, captions, voice, language, template, shot_list)
+                        consistent, captions, voice, language, template, shot_list,
+                        motion_engine="video" if cinematic else "kenburns")
         size = os.path.getsize(result["animatic"])
         with open(result["animatic"], "rb") as f:
             video = f.read()
