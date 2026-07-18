@@ -30,10 +30,11 @@ def call(body_obj, headers=None, path="/mcp", method="POST"):
     body = json.dumps(body_obj).encode()
     async def receive():
         return {"type": "http.request", "body": body, "more_body": False}
-    out = {}
+    out = {"headers": {}}
     async def send(msg):
         if msg["type"] == "http.response.start":
             out["status"] = msg["status"]
+            out["headers"] = {k.decode(): v.decode() for k, v in msg.get("headers", [])}
         elif msg["type"] == "http.response.body":
             out["body"] = msg.get("body", b"")
     asyncio.new_event_loop().run_until_complete(mw(scope, receive, send))
@@ -63,10 +64,17 @@ def main():
     check("tools/list -> free (200)", call({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["status"] == 200)
     check("GET (SSE handshake) -> free", call({}, method="GET")["status"] == 200)
 
-    print("\n== verified payment passes through ==")
-    x402.verify = lambda hdr, res: (bool(hdr), "" if hdr else "missing")  # stub facilitator
+    print("\n== verified + settled payment passes through with proof ==")
+    x402.verify = lambda hdr, res: (bool(hdr), "" if hdr else "missing")            # stub facilitator /verify
+    x402.settle = lambda hdr, res: (True, {"success": True, "txHash": "0xdeadbeef"})  # stub /settle
     xp = base64.b64encode(json.dumps({"x402Version": 1, "scheme": "exact", "network": "x-layer", "payload": {}}).encode()).decode()
-    check("paid call + verified X-PAYMENT -> 200", call(paid, {"x-payment": xp})["status"] == 200)
+    r = call(paid, {"x-payment": xp})
+    check("paid + verified + settled -> 200", r["status"] == 200)
+    check("X-PAYMENT-RESPONSE header carries settlement proof", "0xdeadbeef" in base64.b64decode(r["headers"].get("x-payment-response", "")).decode())
+
+    print("\n== settlement failure is not served ==")
+    x402.settle = lambda hdr, res: (False, {"error": "insufficient funds"})
+    check("verified but unsettled -> 402", call(paid, {"x-payment": xp})["status"] == 402)
 
     print("\n" + ("test_x402: ALL PASSED" if not FAILS else f"test_x402 FAILURES: {FAILS}"))
     return 1 if FAILS else 0

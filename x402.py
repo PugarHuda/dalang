@@ -11,7 +11,7 @@ access_key flow is unchanged.
 Spec: coinbase/x402 v1. The handshake and tools/list stay free; only the paid
 tools/call is gated.
 """
-import base64, json, os, urllib.request
+import asyncio, base64, json, os, urllib.request
 
 PAID_TOOL = "generate_animatic"
 MCP_PATH = os.environ.get("DALANG_MCP_PATH", "/mcp")
@@ -64,6 +64,28 @@ def verify(x_payment_b64: str, resource: str) -> tuple[bool, str]:
     except Exception as e:  # a facilitator outage must not silently grant free compute
         return False, f"facilitator error: {e}"
 
+def settle(x_payment_b64: str, resource: str) -> tuple[bool, dict]:
+    """Capture a verified payment via the facilitator's /settle (x402). Returns
+    (success, settlement); the settlement dict goes back in X-PAYMENT-RESPONSE so the
+    caller has on-chain proof (tx hash) that this render was paid."""
+    fac = _cfg()["facilitator"]
+    if not fac:
+        return False, {"error": "no facilitator configured"}
+    try:
+        payload = json.loads(base64.b64decode(x_payment_b64))
+    except Exception:
+        return False, {"error": "malformed X-PAYMENT header"}
+    body = json.dumps({"x402Version": 1, "paymentPayload": payload,
+                       "paymentRequirements": payment_requirements(resource)["accepts"][0]}).encode()
+    try:
+        req = urllib.request.Request(fac.rstrip("/") + "/settle", data=body,
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            res = json.loads(r.read())
+        return bool(res.get("success")), res
+    except Exception as e:
+        return False, {"error": f"settlement failed: {e}"}
+
 def is_paid_call(body: bytes) -> bool:
     """True only for a JSON-RPC tools/call of the paid tool — the handshake,
     tools/list, and free tools pass through unpaid."""
@@ -96,16 +118,31 @@ class X402Middleware:
             chunks.append(m.get("body", b""))
             more = m.get("more_body", False)
         body = b"".join(chunks)
+        downstream_send = send
         if is_paid_call(body):
             resource = f"{scope.get('scheme','https')}://{_header(scope, b'host') or 'localhost'}{MCP_PATH}"
-            ok, reason = verify(_header(scope, b"x-payment"), resource)
-            if not ok:
+            xp = _header(scope, b"x-payment")
+
+            async def reject(reason):  # emit the x402 402 challenge
                 out = json.dumps(payment_requirements(resource) | {"error": reason}).encode()
                 await send({"type": "http.response.start", "status": 402,
                             "headers": [(b"content-type", b"application/json"),
                                         (b"content-length", str(len(out)).encode())]})
                 await send({"type": "http.response.body", "body": out})
-                return
+
+            ok, reason = await asyncio.to_thread(verify, xp, resource)  # off the event loop
+            if not ok:
+                return await reject(reason)
+            settled, sresult = await asyncio.to_thread(settle, xp, resource)  # capture on X Layer
+            if not settled:
+                return await reject(sresult.get("error", "settlement failed"))
+            xpr = base64.b64encode(json.dumps(sresult).encode())
+            async def paid_send(msg):  # attach on-chain settlement proof to the response
+                if msg["type"] == "http.response.start":
+                    msg = {**msg, "headers": list(msg.get("headers", [])) + [(b"x-payment-response", xpr)]}
+                await send(msg)
+            downstream_send = paid_send
+
         sent = False
         async def replay():
             nonlocal sent
@@ -113,4 +150,4 @@ class X402Middleware:
                 sent = True
                 return {"type": "http.request", "body": body, "more_body": False}
             return {"type": "http.disconnect"}
-        await self.app(scope, replay, send)
+        await self.app(scope, replay, downstream_send)
