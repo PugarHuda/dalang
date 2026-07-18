@@ -137,6 +137,11 @@ def main():
     nft = minted.get("nft_metadata", {})
     check("mint=True -> ERC-721 metadata", bool(nft.get("image")) and bool(nft.get("animation_url")) and nft.get("properties", {}).get("content_cid", "").startswith("bafkrei"))
 
+    print("\n== storyboard preview funnel (cheap: shots + hero, no video) ==")
+    sb = server.storyboard(brief="a cozy cafe", aspect_ratio="9:16", target_seconds=20)
+    check("preview: shots + hero poster, no video", len(sb.get("shots", [])) > 0
+          and sb.get("hero_data_uri", "").startswith("data:image/png") and "animatic_data_uri" not in sb)
+
     print("\n== composability: shot_list skips breakdown ==")
     pipeline.breakdown = boom
     out = server.generate_animatic(brief="", shot_list=PLAN, aspect_ratio="16:9", target_seconds=30)

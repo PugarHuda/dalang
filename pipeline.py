@@ -438,6 +438,19 @@ def assemble(clips: list[str], out: str) -> None:
     finally:
         os.unlink(listfile)  # don't leak the concat list in system temp if ffmpeg fails
 
+def storyboard(brief: str, style: str, aspect: str, target_seconds: int, workdir: str,
+               language: str = "", template: str = "") -> dict:
+    """Cheap preview tier (~1 LLM + 1 image call, no video): the shot list + a single
+    hero frame, so a caller can approve the direction before paying for a full render."""
+    w, h = dims(aspect)
+    plan = breakdown(apply_template(brief, template), resolve_style(style), target_seconds, language)
+    os.makedirs(workdir, exist_ok=True)
+    hero = os.path.join(workdir, "hero.png")
+    seed = int(hashlib.sha256(plan["title"].encode()).hexdigest(), 16) % 100000
+    gen_image(plan["shots"][0]["image_prompt"], hero, w, h, plan.get("subject", ""), seed)
+    return {"title": plan["title"], "subject": plan.get("subject", ""),
+            "shots": plan["shots"], "hero": hero, "srt": build_srt(plan)}
+
 def render(brief: str, style: str, aspect: str, target_seconds: int, voiceover: bool,
            workdir: str, consistent: bool = True, captions: bool = True, voice: str = "",
            language: str = "", template: str = "", shot_list: dict | None = None,

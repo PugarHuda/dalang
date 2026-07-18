@@ -54,6 +54,10 @@ The result includes a `poster_data_uri` (hero frame) for thumbnails/`og:image` a
 to render it directly and skip the LLM — so an upstream "director" agent can own the
 storyboard and call DALANG purely as the render primitive.
 
+**Two-tier funnel:** a cheap `storyboard(brief=...)` tool returns just the shot list +
+a hero frame (a preview, free at the x402 layer) so a caller can approve the direction
+before paying for the full `generate_animatic` render.
+
 ## Native x402 payments on X Layer (OKX A2MCP)
 OKX A2MCP settles pay-per-call as an **x402** flow on **X Layer** (USDT/USDG via the
 Agent Payments Protocol). DALANG speaks it natively: set `DALANG_X402_PAYTO` (your X

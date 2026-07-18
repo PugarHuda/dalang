@@ -29,7 +29,7 @@ import time, urllib.request
 import x402       # x402/X Layer paid-endpoint gate (opt-in via DALANG_X402_PAYTO)
 import provenance  # Web3 provenance: content fingerprint + CID + mint-ready NFT metadata
 import tokengate   # X Layer token-gating (opt-in via DALANG_TOKENGATE_CONTRACT)
-from pipeline import render  # imported after .env load
+from pipeline import render, storyboard as _storyboard  # imported after .env load
 
 # A remote A2MCP caller can't read the host FS, so the video is delivered inline as a
 # data URI. Default cap is serverless-safe: Vercel caps a function response at ~4.5 MB
@@ -174,6 +174,49 @@ def generate_animatic(
         return {"error": f"render failed: {e}"}
     finally:
         if not KEEP_FILES:  # no disk leak on the host
+            shutil.rmtree(workdir, ignore_errors=True)
+
+@mcp.tool
+def storyboard(
+    brief: str,
+    style: str = "cinematic, warm color grade, shallow depth of field",
+    aspect_ratio: str = "9:16",
+    target_seconds: int = 30,
+    language: str = "",
+    template: str = "",
+    wallet: str = "",
+    access_key: str = "",
+) -> dict:
+    """Cheap PREVIEW of an animatic: the shot list + a single hero frame, no video.
+    Lets a caller (or agent) approve the direction before paying for a full render via
+    generate_animatic. Same args as generate_animatic (subset). Free at the x402 layer.
+
+    Returns the shot list, a hero poster (data URI), an SRT preview, and metadata.
+    On failure returns {"error": ...} instead of raising.
+    """
+    if ACCESS_KEY and not hmac.compare_digest(access_key, ACCESS_KEY):
+        return {"error": "unauthorized: valid access_key required"}
+    if tokengate.enabled():
+        ok, reason = tokengate.check(wallet)
+        if not ok:
+            return {"error": f"token-gated: {reason}"}
+    if not (brief or "").strip():
+        return {"error": "brief is required"}
+    if aspect_ratio not in VALID_ASPECTS:
+        return {"error": f"aspect_ratio must be one of {list(VALID_ASPECTS)}"}
+    workdir = os.path.join(WORKROOT, uuid.uuid4().hex[:12])
+    try:
+        target_seconds = max(8, min(90, int(target_seconds)))
+        sb = _storyboard(brief.strip(), style, aspect_ratio, target_seconds, workdir, language, template)
+        with open(sb["hero"], "rb") as f:
+            poster = "data:image/png;base64," + base64.b64encode(f.read()).decode()
+        return {"title": sb["title"], "subject": sb["subject"], "shots": sb["shots"],
+                "srt": sb["srt"], "hero_data_uri": poster,
+                "next": "call generate_animatic with the same brief (or this shot_list) to render the full video"}
+    except Exception as e:
+        return {"error": f"storyboard failed: {e}"}
+    finally:
+        if not KEEP_FILES:
             shutil.rmtree(workdir, ignore_errors=True)
 
 if __name__ == "__main__":
