@@ -64,12 +64,24 @@ private key ever touches this server. Off by default (unset → the free / acces
 is unchanged). See `x402.py` + `test_x402.py`. This is the piece that only works inside
 OKX's ecosystem — the render engine is portable, the *on-chain metered billing* is not.
 
+## Web3 provenance & NFT-ready output
+Every render returns on-chain-ready provenance (dep-free, deterministic, no RPC):
+- `content_sha256` — a `0x…` SHA-256 fingerprint of the exact animatic bytes.
+- `content_cid` — a CIDv1 (raw codec, sha2-256, `bafkrei…`) — a real IPFS content id;
+  pin the mp4 and it resolves to the same address, so authorship is verifiable.
+- `mint=True` → `nft_metadata`: OpenSea/ERC-721 metadata (image, animation_url,
+  attributes: style/aspect/shots/duration/engine/language) ready to pin + mint on X Layer.
+
+So the full agentic loop closes on-chain: an agent **pays** per render (x402 on X Layer)
+and receives a **provably-authored, mint-ready** creative asset. See `provenance.py`.
+
 ## Repository layout
 ```
 dalang/
 ├── pipeline.py     # script → shot list → frames → voiceover → animatic (+ self-check)
 ├── server.py       # FastMCP server; one tool = one pay-per-call
 ├── x402.py         # x402 / X Layer paid-endpoint gate (OKX A2MCP), opt-in
+├── provenance.py   # content fingerprint + IPFS CID + mint-ready NFT metadata
 ├── test_render.py  # offline integration test (real ffmpeg, stubbed Venice)
 ├── test_x402.py    # x402 payment-gate test (pure)
 ├── web/            # landing page (deployed to Vercel), embeds the demo video

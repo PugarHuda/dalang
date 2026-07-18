@@ -25,7 +25,8 @@ def _load_dotenv(path: str = ".env") -> None:
 
 
 _load_dotenv()
-import x402  # x402/X Layer paid-endpoint gate (opt-in via DALANG_X402_PAYTO)
+import x402       # x402/X Layer paid-endpoint gate (opt-in via DALANG_X402_PAYTO)
+import provenance  # Web3 provenance: content fingerprint + CID + mint-ready NFT metadata
 from pipeline import render  # imported after .env load
 
 # A remote A2MCP caller can't read the host's filesystem, so we embed the video
@@ -56,6 +57,7 @@ def generate_animatic(
     template: str = "",
     shot_list: dict | None = None,
     cinematic: bool = False,
+    mint: bool = False,
     access_key: str = "",
 ) -> dict:
     """Turn a script or idea into a storyboard + narrated animatic video.
@@ -78,10 +80,13 @@ def generate_animatic(
             directly, skipping the LLM — for agents that own the storyboard step.
         cinematic: PREMIUM real-motion tier — animate each shot with image-to-video
             (~$0.55/shot) instead of stills + Ken Burns. Price this call accordingly.
+        mint: also return ERC-721 metadata (image, animation_url, attributes) so the
+            caller can mint the animatic as an NFT on X Layer.
         access_key: required only if the server sets DALANG_ACCESS_KEY.
 
     Returns the animatic (base64 data URI), a poster frame, an SRT subtitle track,
-    the shot list, and metadata. On failure returns {"error": ...} instead of raising.
+    a content fingerprint (content_sha256) + IPFS content id (content_cid) for on-chain
+    provenance, the shot list, and metadata. On failure returns {"error": ...}.
     """
     if ACCESS_KEY and not hmac.compare_digest(access_key, ACCESS_KEY):  # constant-time
         return {"error": "unauthorized: valid access_key required"}
@@ -113,6 +118,18 @@ def generate_animatic(
         out["animatic_data_uri"] = "data:video/mp4;base64," + base64.b64encode(video).decode()
         if size > MAX_INLINE_BYTES:
             out["warning"] = f"animatic {size} bytes exceeds inline cap ({MAX_INLINE_BYTES}); large payload"
+        # Web3 provenance: a fingerprint + IPFS content id anyone can verify, so a paid
+        # render is provably authored + mint-ready on X Layer.
+        out["content_sha256"] = provenance.content_sha256(video)
+        out["content_cid"] = provenance.content_cid(video)
+        if mint:  # ERC-721 metadata ready to pin + mint on X Layer
+            out["nft_metadata"] = provenance.erc721_metadata(
+                out["title"], plan.get("subject", "") or brief,
+                out.get("poster_data_uri", ""), out["animatic_data_uri"],
+                {"Style": style, "Aspect": aspect_ratio, "Shots": len(out["shots"]),
+                 "Duration (s)": out["duration_seconds"],
+                 "Engine": "cinematic" if cinematic else "Ken Burns", "Language": language},
+                out["content_sha256"], out["content_cid"])
         if KEEP_FILES:  # local debugging keeps the files + paths
             out.update({k: result[k] for k in ("animatic", "frames", "shot_list")})
         return out

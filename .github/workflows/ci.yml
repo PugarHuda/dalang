@@ -10,6 +10,8 @@ jobs:
           python-version: "3.12"
       - name: Pipeline self-check (pure logic, no API/ffmpeg)
         run: python pipeline.py
+      - name: Provenance self-check (fingerprint + CID + NFT metadata)
+        run: python provenance.py
       - name: Install deps + ffmpeg
         run: |
           pip install -r requirements.txt

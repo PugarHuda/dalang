@@ -130,6 +130,11 @@ def main():
     check("srt with cues", "-->" in out.get("srt", ""))
     check("title + 3 shots", bool(out.get("title")) and len(out.get("shots", [])) == 3)
     check("workdir cleaned (no paths leaked)", "animatic" not in out)
+    check("web3 provenance: sha256 + cid", out.get("content_sha256", "").startswith("0x") and out.get("content_cid", "").startswith("bafkrei"))
+    check("no nft_metadata unless mint=True", "nft_metadata" not in out)
+    minted = server.generate_animatic(brief="a cozy cafe", aspect_ratio="9:16", target_seconds=20, mint=True)
+    nft = minted.get("nft_metadata", {})
+    check("mint=True -> ERC-721 metadata", bool(nft.get("image")) and bool(nft.get("animation_url")) and nft.get("properties", {}).get("content_cid", "").startswith("bafkrei"))
 
     print("\n== composability: shot_list skips breakdown ==")
     pipeline.breakdown = boom
