@@ -27,6 +27,7 @@ def _load_dotenv(path: str = ".env") -> None:
 _load_dotenv()
 import x402       # x402/X Layer paid-endpoint gate (opt-in via DALANG_X402_PAYTO)
 import provenance  # Web3 provenance: content fingerprint + CID + mint-ready NFT metadata
+import tokengate   # X Layer token-gating (opt-in via DALANG_TOKENGATE_CONTRACT)
 from pipeline import render  # imported after .env load
 
 # A remote A2MCP caller can't read the host's filesystem, so we embed the video
@@ -58,6 +59,7 @@ def generate_animatic(
     shot_list: dict | None = None,
     cinematic: bool = False,
     mint: bool = False,
+    wallet: str = "",
     access_key: str = "",
 ) -> dict:
     """Turn a script or idea into a storyboard + narrated animatic video.
@@ -82,6 +84,8 @@ def generate_animatic(
             (~$0.55/shot) instead of stills + Ken Burns. Price this call accordingly.
         mint: also return ERC-721 metadata (image, animation_url, attributes) so the
             caller can mint the animatic as an NFT on X Layer.
+        wallet: caller's X Layer address — required only if the server sets
+            DALANG_TOKENGATE_CONTRACT (renders gated to holders of that token/NFT).
         access_key: required only if the server sets DALANG_ACCESS_KEY.
 
     Returns the animatic (base64 data URI), a poster frame, an SRT subtitle track,
@@ -90,6 +94,10 @@ def generate_animatic(
     """
     if ACCESS_KEY and not hmac.compare_digest(access_key, ACCESS_KEY):  # constant-time
         return {"error": "unauthorized: valid access_key required"}
+    if tokengate.enabled():  # X Layer holders-only, if configured
+        ok, reason = tokengate.check(wallet)
+        if not ok:
+            return {"error": f"token-gated: {reason}"}
     brief = (brief or "").strip()
     if not brief and not shot_list:  # one of the two must drive the render
         return {"error": "brief is required (or pass a shot_list)"}

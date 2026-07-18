@@ -12,6 +12,8 @@ jobs:
         run: python pipeline.py
       - name: Provenance self-check (fingerprint + CID + NFT metadata)
         run: python provenance.py
+      - name: Token-gate self-check (X Layer balanceOf, mocked RPC)
+        run: python tokengate.py
       - name: Install deps + ffmpeg
         run: |
           pip install -r requirements.txt
