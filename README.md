@@ -86,6 +86,8 @@ dalang/
 ├── server.py       # FastMCP server; one tool = one pay-per-call
 ├── x402.py         # x402 / X Layer paid-endpoint gate (OKX A2MCP), opt-in
 ├── provenance.py   # content fingerprint + IPFS CID + mint-ready NFT metadata
+├── tokengate.py    # X Layer token-gating (balanceOf)
+├── contracts/      # DalangCredits.sol — ERC-20 render-credit token (1 credit = 1 render)
 ├── test_render.py  # offline integration test (real ffmpeg, stubbed Venice)
 ├── test_x402.py    # x402 payment-gate test (pure)
 ├── web/            # landing page (deployed to Vercel), embeds the demo video
