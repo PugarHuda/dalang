@@ -1,4 +1,7 @@
 fastmcp==3.4.4
+# ffmpeg: containers use the system binary (Dockerfile); serverless (Vercel) has none,
+# so this ships a static build that _resolve_ffmpeg() falls back to. Harmless on a
+# container (system ffmpeg on PATH wins).
+imageio-ffmpeg
 # LLM + image + TTS all go through Venice (OpenAI-compatible) via stdlib urllib —
 # no extra client libs needed.
-# system dependency (not pip): ffmpeg must be on PATH

@@ -1,0 +1,13 @@
+web/
+runs/
+__pycache__/
+*.pyc
+.env
+.git/
+.github/
+test_*.py
+*.md
+Dockerfile
+.dockerignore
+render.yaml
+demo-x-post.md

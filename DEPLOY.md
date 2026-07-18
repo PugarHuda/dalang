@@ -32,6 +32,25 @@ fly deploy
 # endpoint: https://<app>.fly.dev/mcp
 ```
 
+## Option D — Vercel (free tier, no container) — via Fluid Compute
+The repo ships the serverless entrypoint (`api/index.py`, `vercel.json`, `.vercelignore`):
+a stateless MCP app with a **pip-bundled ffmpeg** (`imageio-ffmpeg`), so no Docker needed.
+This is a **separate** Vercel project from the landing page.
+
+1. **vercel.com → Add New → Project → import `PugarHuda/dalang`.**
+   Set **Root Directory = repo root** (the folder with `api/`, NOT `web/`).
+2. **Settings → Functions → enable *Fluid Compute*** (required for ffmpeg + long runs).
+   On Pro you can raise `maxDuration` up to 800s; the free/Hobby default in `vercel.json`
+   is 300s (fine for the Ken Burns tier).
+3. **Settings → Environment Variables → `VENICE_API_KEY`** (+ any `DALANG_X402_*`,
+   `DALANG_TOKENGATE_*`, `VENICE_*`). Do **not** commit the key.
+4. **Deploy.** Endpoint: `https://<app>.vercel.app/mcp`.
+
+Caveats: serverless keeps no session (we run MCP `stateless_http`); only `/tmp` is
+writable (WORKROOT is set there); the **cinematic tier** polls Venice for minutes and can
+exceed the duration limit, so prefer it on a container or keep shot counts low on Vercel.
+The default **Ken Burns** tier renders comfortably within 300s.
+
 ## Smoke test after deploy
 A raw `curl` won't work — MCP streamable HTTP needs the `initialize` handshake and a
 session. Use a FastMCP client (`pip install fastmcp`):

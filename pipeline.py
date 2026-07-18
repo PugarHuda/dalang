@@ -321,6 +321,23 @@ def gen_video(frame_path: str, image_prompt: str, motion: str, out_path: str,
 
 # ---------- ffmpeg assembly ----------
 
+def _resolve_ffmpeg() -> str:
+    """ffmpeg path: FFMPEG_BINARY env -> system PATH -> pip's imageio-ffmpeg static
+    binary. The last one lets serverless hosts (Vercel Fluid Compute) that have no
+    system ffmpeg still render — see api/index.py."""
+    import shutil
+    if os.environ.get("FFMPEG_BINARY"):
+        return os.environ["FFMPEG_BINARY"]
+    if shutil.which("ffmpeg"):
+        return "ffmpeg"
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return "ffmpeg"
+
+FFMPEG = _resolve_ffmpeg()
+
 def _run(cmd: list[str]) -> None:
     subprocess.run(cmd, check=True, capture_output=True)
 
@@ -358,7 +375,7 @@ def _caption_filter(text: str, w: int, h: int, capfile: str) -> str:
 def build_clip(img: str, sec: float, motion: str, w: int, h: int,
                audio: str | None, out: str, caption: str = "") -> None:
     vf = zoompan_filter(motion, sec, w, h) + _caption_filter(caption, w, h, out + ".cap.txt")
-    cmd = ["ffmpeg", "-y", "-loop", "1", "-i", img]
+    cmd = [FFMPEG, "-y", "-loop", "1", "-i", img]
     if audio:
         cmd += ["-i", audio]
     # -t (not -shortest): clip is exactly `sec`; short VO leaves trailing silence,
@@ -383,7 +400,7 @@ def build_clip_from_video(video_in: str, w: int, h: int, audio: str | None,
           f"[fg]scale={w}:{h}:force_original_aspect_ratio=decrease[fg];"
           f"[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1,format=yuv420p"
           + _caption_filter(caption, w, h, out + ".cap.txt"))
-    cmd = ["ffmpeg", "-y", "-i", video_in]
+    cmd = [FFMPEG, "-y", "-i", video_in]
     if audio:  # replace the clip's own audio with the narration track
         cmd += ["-i", audio, "-map", "0:v", "-map", "1:a"]
     cmd += ["-t", str(VID_SECS), "-vf", vf, "-r", "30",
@@ -400,7 +417,7 @@ def assemble(clips: list[str], out: str) -> None:
             f.write(f"file '{os.path.abspath(c).replace(os.sep, '/')}'\n")
         listfile = f.name
     try:
-        _run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", listfile,
+        _run([FFMPEG, "-y", "-f", "concat", "-safe", "0", "-i", listfile,
               "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "26",
               "-c:a", "aac", "-movflags", "+faststart", out])  # crf+faststart: smaller, streamable
     finally:
