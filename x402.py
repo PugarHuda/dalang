@@ -118,36 +118,54 @@ class X402Middleware:
             chunks.append(m.get("body", b""))
             more = m.get("more_body", False)
         body = b"".join(chunks)
-        downstream_send = send
-        if is_paid_call(body):
-            resource = f"{scope.get('scheme','https')}://{_header(scope, b'host') or 'localhost'}{MCP_PATH}"
-            xp = _header(scope, b"x-payment")
 
-            async def reject(reason):  # emit the x402 402 challenge
-                out = json.dumps(payment_requirements(resource) | {"error": reason}).encode()
-                await send({"type": "http.response.start", "status": 402,
-                            "headers": [(b"content-type", b"application/json"),
-                                        (b"content-length", str(len(out)).encode())]})
-                await send({"type": "http.response.body", "body": out})
+        def make_replay():  # a fresh receive() that replays the buffered body once
+            sent = False
+            async def replay():
+                nonlocal sent
+                if not sent:
+                    sent = True
+                    return {"type": "http.request", "body": body, "more_body": False}
+                return {"type": "http.disconnect"}
+            return replay
 
-            ok, reason = await asyncio.to_thread(verify, xp, resource)  # off the event loop
-            if not ok:
-                return await reject(reason)
+        if not is_paid_call(body):
+            return await self.app(scope, make_replay(), send)
+
+        resource = f"{scope.get('scheme','https')}://{_header(scope, b'host') or 'localhost'}{MCP_PATH}"
+        xp = _header(scope, b"x-payment")
+
+        async def reject(reason):  # emit the x402 402 challenge, no compute run
+            out = json.dumps(payment_requirements(resource) | {"error": reason}).encode()
+            await send({"type": "http.response.start", "status": 402,
+                        "headers": [(b"content-type", b"application/json"),
+                                    (b"content-length", str(len(out)).encode())]})
+            await send({"type": "http.response.body", "body": out})
+
+        ok, reason = await asyncio.to_thread(verify, xp, resource)  # verify BEFORE compute
+        if not ok:
+            return await reject(reason)
+
+        # Run the render, buffering its response, so we settle (capture funds) ONLY after
+        # a successful render — a failed/timed-out render must not charge the caller. (MCP
+        # stateless tool calls return a single JSON response, so buffering is safe.)
+        buffered, status = [], 500
+        async def capture(msg):
+            nonlocal status
+            if msg["type"] == "http.response.start":
+                status = msg["status"]
+            buffered.append(msg)
+        await self.app(scope, make_replay(), capture)
+
+        # Success = 2xx AND the tool didn't return an {"error": ...} (guards + render
+        # failures come back as HTTP 200 error dicts on MCP, so status alone isn't enough).
+        resp_body = b"".join(m.get("body", b"") for m in buffered if m["type"] == "http.response.body")
+        if 200 <= status < 300 and b'"error"' not in resp_body:
             settled, sresult = await asyncio.to_thread(settle, xp, resource)  # capture on X Layer
-            if not settled:
-                return await reject(sresult.get("error", "settlement failed"))
-            xpr = base64.b64encode(json.dumps(sresult).encode())
-            async def paid_send(msg):  # attach on-chain settlement proof to the response
-                if msg["type"] == "http.response.start":
-                    msg = {**msg, "headers": list(msg.get("headers", [])) + [(b"x-payment-response", xpr)]}
-                await send(msg)
-            downstream_send = paid_send
-
-        sent = False
-        async def replay():
-            nonlocal sent
-            if not sent:
-                sent = True
-                return {"type": "http.request", "body": body, "more_body": False}
-            return {"type": "http.disconnect"}
-        await self.app(scope, replay, downstream_send)
+            if settled:  # attach on-chain proof (tx hash) so the caller can verify payment
+                xpr = base64.b64encode(json.dumps(sresult).encode())
+                for m in buffered:
+                    if m["type"] == "http.response.start":
+                        m["headers"] = list(m.get("headers", [])) + [(b"x-payment-response", xpr)]
+        for m in buffered:  # flush the render's response (success or the error) to the caller
+            await send(m)

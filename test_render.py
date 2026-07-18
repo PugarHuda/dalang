@@ -131,6 +131,7 @@ def main():
     check("title + 3 shots", bool(out.get("title")) and len(out.get("shots", [])) == 3)
     check("workdir cleaned (no paths leaked)", "animatic" not in out)
     check("web3 provenance: sha256 + cid", out.get("content_sha256", "").startswith("0x") and out.get("content_cid", "").startswith("bafkrei"))
+    check("proof-of-creation manifest + digest", out.get("provenance_manifest", {}).get("spec") == "dalang-provenance/1" and out.get("provenance_digest", "").startswith("0x"))
     check("no nft_metadata unless mint=True", "nft_metadata" not in out)
     minted = server.generate_animatic(brief="a cozy cafe", aspect_ratio="9:16", target_seconds=20, mint=True)
     nft = minted.get("nft_metadata", {})

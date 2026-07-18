@@ -288,11 +288,17 @@ def video_quote(model: str = "", duration: str = "", resolution: str = "") -> fl
                                  "resolution": resolution or VIDEO_RES})
     return float(r.get("quote", 0))
 
+# Keep max_wait comfortably under a serverless maxDuration (Vercel Hobby = 300s): a
+# stalled job must fail fast so the Ken Burns fallback runs before the function is killed.
+VIDEO_MAX_WAIT = int(os.environ.get("DALANG_VIDEO_MAX_WAIT", 240))
+_VIDEO_TERMINAL_FAIL = {"FAILED", "ERROR", "CANCELED", "CANCELLED"}
+
 def gen_video(frame_path: str, image_prompt: str, motion: str, out_path: str,
-              poll_every: int = 5, max_wait: int = 600) -> None:
+              poll_every: int = 5, max_wait: int = 0) -> None:
     """Animate a still into a real-motion clip (Venice image-to-video, async queue).
-    PREMIUM ~$0.55/clip. queue -> poll /video/retrieve -> save mp4. Raises on failure.
-    No aspect_ratio is sent — wan derives it from the source image."""
+    PREMIUM ~$0.55/clip. queue -> poll /video/retrieve -> save mp4. Raises on failure
+    (so the caller falls back to Ken Burns). No aspect_ratio — wan derives it."""
+    max_wait = max_wait or VIDEO_MAX_WAIT
     b64 = "data:image/png;base64," + base64.b64encode(open(frame_path, "rb").read()).decode()
     prompt = f"{image_prompt}. Camera: {_MOTION_PHRASE.get(motion, _MOTION_PHRASE['static'])}. Subtle lifelike motion."
     q = _venice("/video/queue", {"model": VIDEO_MODEL, "prompt": prompt, "image_url": b64,
@@ -309,9 +315,14 @@ def gen_video(frame_path: str, image_prompt: str, motion: str, out_path: str,
             body = json.loads(raw)
         except Exception:
             body = {}
-        if body.get("status") == "COMPLETED":  # fetch from the private-share URL
-            req = urllib.request.Request(body["download_url"],
-                                         headers={"Authorization": f"Bearer {os.environ['VENICE_API_KEY']}"})
+        status = str(body.get("status", "")).upper()
+        if status in _VIDEO_TERMINAL_FAIL:  # fail fast -> fallback runs; don't burn max_wait
+            raise RuntimeError(f"video job {status.lower()}: {body.get('error', qid)}")
+        if status == "COMPLETED":  # fetch from the private-share URL
+            url = body.get("download_url")
+            if not url:
+                raise RuntimeError("video COMPLETED without a download_url")
+            req = urllib.request.Request(url, headers={"Authorization": f"Bearer {os.environ['VENICE_API_KEY']}"})
             with urllib.request.urlopen(req, timeout=180) as r, open(out_path, "wb") as f:
                 f.write(r.read())
             return
@@ -340,6 +351,10 @@ FFMPEG = _resolve_ffmpeg()
 
 def _run(cmd: list[str]) -> None:
     subprocess.run(cmd, check=True, capture_output=True)
+
+def _placeholder_frame(out: str, w: int, h: int) -> None:
+    """A solid dark frame so one failed shot can't sink a whole paid render."""
+    _run([FFMPEG, "-y", "-f", "lavfi", "-i", f"color=c=0x1a1206:s={w}x{h}:d=1", "-frames:v", "1", out])
 
 def _font_file() -> str | None:
     """A TTF for drawtext captions. python:3.12-slim ships no fonts, so the Dockerfile
@@ -478,18 +493,26 @@ def render(brief: str, style: str, aspect: str, target_seconds: int, voiceover: 
             try:  # best-effort: a single edit refusal/failure must not kill the render
                 edit_image(s["image_prompt"], hero, out, subject)
             except Exception:
-                gen_image(s["image_prompt"], out, w, h, subject, seed)  # fall back to fresh gen
+                try:
+                    gen_image(s["image_prompt"], out, w, h, subject, seed)  # fall back to fresh gen
+                except Exception:
+                    _placeholder_frame(out, w, h)  # ...and a solid frame before we'd ever fail the render
             return out
 
         with ThreadPoolExecutor(max_workers=6) as ex:
             edited = list(ex.map(consistent_frame, shots[1:]))
         frames = [hero] + edited
     else:
+        def independent_frame(s):
+            out = frame_path(s)
+            try:  # best-effort: one shot's failure must not sink the whole render
+                gen_image(s["image_prompt"], out, w, h, subject, seed)
+            except Exception:
+                _placeholder_frame(out, w, h)
+            return out
+
         with ThreadPoolExecutor(max_workers=6) as ex:
-            frames = list(ex.map(
-                lambda s: (gen_image(s["image_prompt"], frame_path(s), w, h, subject, seed)
-                           or frame_path(s)),
-                shots))
+            frames = list(ex.map(independent_frame, shots))
     # voiceovers (independent, parallel)
     with ThreadPoolExecutor(max_workers=6) as ex:
         auds = list(ex.map(do_tts, shots))

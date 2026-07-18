@@ -64,17 +64,36 @@ def main():
     check("tools/list -> free (200)", call({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["status"] == 200)
     check("GET (SSE handshake) -> free", call({}, method="GET")["status"] == 200)
 
-    print("\n== verified + settled payment passes through with proof ==")
-    x402.verify = lambda hdr, res: (bool(hdr), "" if hdr else "missing")            # stub facilitator /verify
-    x402.settle = lambda hdr, res: (True, {"success": True, "txHash": "0xdeadbeef"})  # stub /settle
+    print("\n== settle only AFTER a successful render (charge-on-failure guard) ==")
+    settled_calls = []
+    x402.verify = lambda hdr, res: (bool(hdr), "" if hdr else "missing")  # stub facilitator /verify
+    def stub_settle(hdr, res):
+        settled_calls.append(1)
+        return True, {"success": True, "txHash": "0xdeadbeef"}
+    x402.settle = stub_settle
     xp = base64.b64encode(json.dumps({"x402Version": 1, "scheme": "exact", "network": "x-layer", "payload": {}}).encode()).decode()
+
+    # successful downstream (200, no error) -> settle runs, proof header attached
     r = call(paid, {"x-payment": xp})
-    check("paid + verified + settled -> 200", r["status"] == 200)
+    check("paid + success -> 200", r["status"] == 200)
+    check("settle called once on success", len(settled_calls) == 1)
     check("X-PAYMENT-RESPONSE header carries settlement proof", "0xdeadbeef" in base64.b64decode(r["headers"].get("x-payment-response", "")).decode())
 
-    print("\n== settlement failure is not served ==")
-    x402.settle = lambda hdr, res: (False, {"error": "insufficient funds"})
-    check("verified but unsettled -> 402", call(paid, {"x-payment": xp})["status"] == 402)
+    # downstream that returns an {"error": ...} -> served, but NOT settled (no charge on failure)
+    async def _err_downstream(scope, receive, send):
+        await receive()
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b'{"error":"render failed"}'})
+    settled_calls.clear()
+    mw = x402.X402Middleware(_err_downstream)
+    scope = {"type": "http", "method": "POST", "path": "/mcp", "scheme": "https",
+             "headers": [(b"host", b"d"), (b"x-payment", xp.encode())]}
+    async def rcv(): return {"type": "http.request", "body": json.dumps(paid).encode(), "more_body": False}
+    got = {}
+    async def snd(m):
+        if m["type"] == "http.response.start": got["status"] = m["status"]
+    asyncio.new_event_loop().run_until_complete(mw(scope, rcv, snd))
+    check("render error served (200), NOT settled -> no charge on failure", got["status"] == 200 and len(settled_calls) == 0)
 
     print("\n" + ("test_x402: ALL PASSED" if not FAILS else f"test_x402 FAILURES: {FAILS}"))
     return 1 if FAILS else 0

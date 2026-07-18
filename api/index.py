@@ -22,7 +22,16 @@ except Exception:
     pass
 os.environ.setdefault("DALANG_WORKROOT", "/tmp/dalang")  # only /tmp is writable on serverless
 
-import server  # loads .env, builds mcp + the x402/tokengate gates
+import server, pipeline  # loads .env, builds mcp + the x402/tokengate gates
+
+# Cold-start health check: fail LOUD in the logs if ffmpeg isn't actually runnable,
+# instead of every paid render dying with an opaque "render failed" at pay time.
+try:
+    import subprocess
+    subprocess.run([pipeline.FFMPEG, "-version"], capture_output=True, timeout=10, check=True)
+    print("[dalang] ffmpeg ok:", pipeline.FFMPEG)
+except Exception as e:
+    print("[dalang] WARNING ffmpeg not runnable:", pipeline.FFMPEG, "->", e)
 
 # stateless_http: every request is self-contained, which is what a serverless function
 # needs (no in-memory MCP session carried across invocations / instances).

@@ -5,6 +5,10 @@ hold >= DALANG_TOKENGATE_MIN of it. The caller passes their `wallet`; the server
 balanceOf(wallet) over JSON-RPC (DALANG_RPC_URL) and allows or rejects. Read-only — no
 keys, no writes. Fail-closed: an RPC error denies (never grants access on a failed read).
 Off by default (unset → no gate).
+
+NOTE: DALANG_TOKENGATE_MIN is in RAW ON-CHAIN UNITS. For an ERC-721 it's an NFT count
+(MIN=1 = "holds any"). For an 18-decimal ERC-20, "1 whole token" is MIN=1000000000000000000,
+not 1 — set the decimals-adjusted value or every dust holder passes.
 """
 import json, os, re, urllib.request
 

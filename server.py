@@ -25,15 +25,33 @@ def _load_dotenv(path: str = ".env") -> None:
 
 
 _load_dotenv()
+import time, urllib.request
 import x402       # x402/X Layer paid-endpoint gate (opt-in via DALANG_X402_PAYTO)
 import provenance  # Web3 provenance: content fingerprint + CID + mint-ready NFT metadata
 import tokengate   # X Layer token-gating (opt-in via DALANG_TOKENGATE_CONTRACT)
 from pipeline import render  # imported after .env load
 
-# A remote A2MCP caller can't read the host's filesystem, so we embed the video
-# in the result. Above this size we still embed (a paid render is never dropped)
-# but flag it — bump the cap or host object storage for very large outputs.
-MAX_INLINE_BYTES = int(os.environ.get("DALANG_MAX_INLINE_BYTES", 8_000_000))
+# A remote A2MCP caller can't read the host FS, so the video is delivered inline as a
+# data URI. Default cap is serverless-safe: Vercel caps a function response at ~4.5 MB
+# and base64 inflates ~33%, so keep inline bytes under ~3.3 MB there. Containers can
+# raise DALANG_MAX_INLINE_BYTES. Over the cap, if object storage is configured
+# (DALANG_UPLOAD_ENDPOINT) the mp4 is uploaded and a URL returned instead.
+MAX_INLINE_BYTES = int(os.environ.get("DALANG_MAX_INLINE_BYTES", 3_300_000))
+ROYALTY_BPS = int(os.environ.get("DALANG_ROYALTY_BPS", 0))       # e.g. 500 = 5%
+ROYALTY_RECIPIENT = os.environ.get("DALANG_ROYALTY_RECIPIENT", "")
+
+def _upload_mp4(data: bytes, name: str) -> str | None:
+    """PUT the mp4 to object storage (S3/R2/Blob-compatible) so large outputs beat the
+    serverless response cap. Returns the public URL, or None if not configured."""
+    base = os.environ.get("DALANG_UPLOAD_ENDPOINT")
+    if not base:
+        return None
+    url = base.rstrip("/") + "/" + name
+    headers = {"Content-Type": "video/mp4"}
+    if os.environ.get("DALANG_UPLOAD_AUTH"):
+        headers["Authorization"] = os.environ["DALANG_UPLOAD_AUTH"]
+    urllib.request.urlopen(urllib.request.Request(url, data=data, method="PUT", headers=headers), timeout=60)
+    return os.environ.get("DALANG_UPLOAD_PUBLIC_BASE", base).rstrip("/") + "/" + name
 
 mcp = FastMCP("dalang")
 
@@ -120,24 +138,35 @@ def generate_animatic(
         if result.get("frames"):  # hero frame as a poster/thumbnail for sharing (og:image)
             with open(result["frames"][0], "rb") as pf:
                 out["poster_data_uri"] = "data:image/png;base64," + base64.b64encode(pf.read()).decode()
-        # Always embed: a remote A2MCP caller can't read the host FS, and the file is
-        # deleted in `finally`, so the data URI is the ONLY delivery channel. Over the
-        # cap we still embed (never drop a paid render) and just flag the large payload.
-        out["animatic_data_uri"] = "data:video/mp4;base64," + base64.b64encode(video).decode()
-        if size > MAX_INLINE_BYTES:
-            out["warning"] = f"animatic {size} bytes exceeds inline cap ({MAX_INLINE_BYTES}); large payload"
-        # Web3 provenance: a fingerprint + IPFS content id anyone can verify, so a paid
-        # render is provably authored + mint-ready on X Layer.
+        # Web3 provenance: a fingerprint + content id anyone can verify (see note on
+        # content_cid — it's the exact-bytes CIDv1, a fingerprint, not a pinned DAG root).
         out["content_sha256"] = provenance.content_sha256(video)
         out["content_cid"] = provenance.content_cid(video)
-        if mint:  # ERC-721 metadata ready to pin + mint on X Layer
+        # Delivery: over the cap, offload to object storage if configured (beats the
+        # serverless response cap); else embed inline (the only channel on a bare host).
+        uploaded = _upload_mp4(video, f"{result['title'][:40] or 'animatic'}-{uuid.uuid4().hex[:8]}.mp4".replace(" ", "_")) \
+            if size > MAX_INLINE_BYTES else None
+        if uploaded:
+            out["animatic_url"] = uploaded
+        else:
+            out["animatic_data_uri"] = "data:video/mp4;base64," + base64.b64encode(video).decode()
+            if size > MAX_INLINE_BYTES:
+                out["warning"] = (f"animatic {size} bytes exceeds inline cap ({MAX_INLINE_BYTES}) and no "
+                                  "DALANG_UPLOAD_ENDPOINT is set; this response may exceed a serverless body limit")
+        media_url = out.get("animatic_url") or f"ipfs://{out['content_cid']}"  # mint placeholder, not the doubled data URI
+        # Proof-of-creation: a tamper-evident manifest; anchor manifest_digest on X Layer.
+        manifest = provenance.provenance_manifest(out["title"], out["content_sha256"], out["content_cid"],
+                                                  int(time.time()), "cinematic" if cinematic else "Ken Burns")
+        out["provenance_manifest"] = manifest
+        out["provenance_digest"] = provenance.manifest_digest(manifest)
+        if mint:  # ERC-721 metadata ready to pin + mint on X Layer (with optional royalties)
             out["nft_metadata"] = provenance.erc721_metadata(
                 out["title"], plan.get("subject", "") or brief,
-                out.get("poster_data_uri", ""), out["animatic_data_uri"],
+                out.get("poster_data_uri", "") or media_url, media_url,
                 {"Style": style, "Aspect": aspect_ratio, "Shots": len(out["shots"]),
                  "Duration (s)": out["duration_seconds"],
                  "Engine": "cinematic" if cinematic else "Ken Burns", "Language": language},
-                out["content_sha256"], out["content_cid"])
+                out["content_sha256"], out["content_cid"], ROYALTY_BPS, ROYALTY_RECIPIENT)
         if KEEP_FILES:  # local debugging keeps the files + paths
             out.update({k: result[k] for k in ("animatic", "frames", "shot_list")})
         return out
