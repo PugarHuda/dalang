@@ -1,8 +1,16 @@
 # Deploying the DALANG ASP (render engine)
 
-The render engine (`server.py` + `pipeline.py` + ffmpeg) needs a **container host** —
-NOT Vercel serverless (no ffmpeg, 60s cap). The `web/` landing page is separate and
-already on Vercel. Any Docker host works; the repo ships a `Dockerfile`.
+The render engine (`server.py` + `pipeline.py` + ffmpeg) runs best on a **container
+host** — the repo ships a `Dockerfile`, so Railway/Render/Fly are one command. The
+`web/` landing page is separate and already on Vercel.
+
+**Can Vercel host the engine too?** As of 2026, technically yes — Vercel **Fluid
+Compute** now runs ffmpeg (bundle a static binary) with up to **800s** duration (Pro),
+so the old "no ffmpeg / 60s cap" no longer holds. But it's the harder path for DALANG:
+you'd bundle a static ffmpeg, run FastMCP in `stateless_http` mode (serverless keeps no
+session between requests), watch the 250 MB bundle cap and cold starts, and the cinematic
+tier can poll Venice for minutes. A container gives a persistent MCP endpoint + a real
+ffmpeg for free. **Recommended: engine on a container, landing page on Vercel.**
 
 ## Option A — Railway (fastest)
 1. railway.app → New Project → Deploy from GitHub repo → `PugarHuda/dalang`.

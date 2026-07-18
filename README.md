@@ -97,8 +97,10 @@ dalang/
 4. Pass OKX's internal review → **go live**. (Without this, the submission is invalid.)
 5. Post a ≤90s demo on X with **#OKXAI** and submit the Google Form.
 
-> Note: Vercel serverless has no ffmpeg and a 60s cap, so it hosts the **landing
-> page**, not the render engine. The engine runs on the MCP/container host.
+> Note: the `web/` landing page is on Vercel. The **render engine** runs on a
+> container host (Railway/Render/Fly, one command via the shipped `Dockerfile`).
+> Vercel *can* now run ffmpeg on **Fluid Compute** (up to 800s), but a persistent
+> MCP endpoint + a bundled ffmpeg is simpler and sturdier on a container — see DEPLOY.md.
 
 ## Suggested per-call pricing
 Venice cost/call ≈ LLM (~$0.01) + 4–10 frames (~$0.01/img, scales with `target_seconds`,
