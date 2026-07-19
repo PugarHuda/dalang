@@ -99,23 +99,30 @@ def zoompan_filter(motion: str, sec: float, w: int, h: int, fps: int = 30) -> st
     )
 
 def validate_plan(plan: dict) -> dict:
+    """Sanitize a shot list into something always renderable. This is the single money-path
+    gate for BOTH the LLM breakdown and a caller's shot_list, so it SELF-HEALS instead of
+    raising — a missing/odd field on one shot must never sink a paid render. The only hard
+    failure is no shots at all (nothing to render)."""
     shots = plan.get("shots")
     if not isinstance(shots, list) or not shots:
         raise ValueError("plan has no shots")
-    if len(shots) > MAX_SHOTS:
-        raise ValueError(f"too many shots ({len(shots)} > {MAX_SHOTS})")
+    shots = shots[:MAX_SHOTS]  # cost cap: truncate a runaway list, don't fail the render
+    title = str(plan.get("title") or "Untitled animatic")
+    subject = str(plan.get("subject") or "")
     for i, s in enumerate(shots):
-        for k in ("image_prompt", "voiceover", "seconds"):
-            if k not in s:
-                raise ValueError(f"shot {i} missing {k}")
-        if not (0.5 <= float(s["seconds"]) <= 15):
-            raise ValueError(f"shot {i} seconds out of range: {s['seconds']}")
-        s["motion"] = _norm_motion(s.get("motion", "static"))  # never trust the enum blindly
+        # coerce every field the render depends on so LLM omissions can't crash a paid call
+        s["image_prompt"] = str(s.get("image_prompt") or "").strip() or subject or title  # a frame needs a prompt
+        s["voiceover"] = str(s.get("voiceover") or "")            # missing line -> silent shot
+        try:
+            sec = float(s.get("seconds", 3))
+        except (TypeError, ValueError):
+            sec = 3.0
+        s["seconds"] = min(15.0, max(0.5, sec))                   # clamp to the renderable range
+        s["motion"] = _norm_motion(s.get("motion", "static"))     # never trust the enum blindly
         s["scene"] = i + 1  # renumber, don't trust: dup/misnumbered scenes collide frame/clip paths
+    plan["shots"] = shots
     # render/server read title (seed) + subject; the LLM may omit them or send non-str.
-    # Guarantee both here (the single gate) so a paid render can't KeyError on a title.
-    plan["title"] = str(plan.get("title") or "Untitled animatic")
-    plan["subject"] = str(plan.get("subject") or "")
+    plan["title"], plan["subject"] = title, subject
     return plan
 
 def total_seconds(plan: dict) -> float:
@@ -712,12 +719,16 @@ def demo() -> None:
     miss = validate_plan({"subject": 7, "shots": [  # no title, non-str subject: must not crash render
         {"image_prompt": "a", "voiceover": "", "seconds": 2}]})
     assert miss["title"] == "Untitled animatic" and miss["subject"] == "7"
-    for bad in ([{"image_prompt": "x", "voiceover": "", "seconds": 99}],
-                [{"image_prompt": "x", "voiceover": "", "seconds": 3}] * 11):
-        try:
-            validate_plan({"shots": bad}); assert False
-        except ValueError:
-            pass
+    # self-heal (money path): an LLM omitting image_prompt on a shot must NOT fail a paid render
+    healed = validate_plan({"subject": "a red mug", "shots": [{"voiceover": "hi", "seconds": 3}]})
+    assert healed["shots"][0]["image_prompt"] == "a red mug"  # falls back to the subject
+    assert validate_plan({"shots": [{"seconds": 99}]})["shots"][0]["seconds"] == 15  # clamped, not raised
+    assert validate_plan({"shots": [{"seconds": "bad"}]})["shots"][0]["seconds"] == 3  # non-numeric -> default
+    assert len(validate_plan({"shots": [{"image_prompt": "x"}] * 15})["shots"]) == MAX_SHOTS  # truncated to cap
+    try:
+        validate_plan({"shots": []}); assert False  # no shots is the one hard failure
+    except ValueError:
+        pass
     print("dalang pipeline self-check ok")
 
 if __name__ == "__main__":
