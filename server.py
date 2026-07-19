@@ -216,14 +216,21 @@ def quote(target_seconds: int = 30, cinematic: bool = False) -> dict:
     from pipeline import shot_budget, MAX_VIDEO_SHOTS, MAX_SHOTS
     t = max(8, min(90, int(target_seconds)))
     n_shots = min(MAX_SHOTS, shot_budget(t)[0])
-    flat = round(int(os.environ.get("DALANG_X402_AMOUNT", "490000")) / 1_000_000, 2)  # list price (6dp USDT)
-    # cinematic is metered per animated shot (~$0.55 Venice cost + margin), so a flat price
-    # can't cover it — quote a cost-plus figure the operator can meter via x402 per call.
-    price = round(min(n_shots, MAX_VIDEO_SHOTS) * 0.79, 2) if cinematic else flat
-    return {"shots": n_shots, "engine": "cinematic" if cinematic else "kenburns",
-            "price_usd": price, "currency": "USDT",
-            "network": os.environ.get("DALANG_X402_NETWORK", "x-layer"),
-            "settlement": "x402 · X Layer", "note": "call generate_animatic to render (this quote is free)"}
+    # price_usd is the amount x402 ACTUALLY charges — a flat DALANG_X402_AMOUNT for any paid
+    # call (the middleware doesn't vary by engine), so we must quote that, not a made-up number.
+    price = round(int(os.environ.get("DALANG_X402_AMOUNT", "490000")) / 1_000_000, 2)
+    out = {"shots": n_shots, "engine": "cinematic" if cinematic else "kenburns",
+           "price_usd": price, "currency": "USDT",
+           "network": os.environ.get("DALANG_X402_NETWORK", "x-layer"),
+           "settlement": "x402 · X Layer", "note": "call generate_animatic to render (this quote is free)"}
+    if cinematic:  # honest: the flat price does NOT cover premium video cost — flag it, don't hide it
+        vshots = min(n_shots, MAX_VIDEO_SHOTS)
+        out["premium"] = True
+        out["est_video_cost_usd"] = round(vshots * 0.55, 2)  # ~$0.55/animated shot of Venice cost
+        out["note"] = ("cinematic is a PREMIUM real-motion tier costing the operator "
+                       f"~${out['est_video_cost_usd']} ({vshots} animated shots); the flat x402 price "
+                       "does not auto-scale — set DALANG_X402_AMOUNT per tier before charging for it")
+    return out
 
 @mcp.tool
 def storyboard(

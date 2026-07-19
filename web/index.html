@@ -192,7 +192,8 @@
   function b32(bytes){var bits=0,val=0,s="";for(var i=0;i<bytes.length;i++){val=(val<<8)|bytes[i];bits+=8;
     while(bits>=5){s+=A[(val>>>(bits-5))&31];bits-=5;}} if(bits>0){s+=A[(val<<(5-bits))&31];} return s;}
   async function run(file){
-    out.innerHTML='Hashing '+file.name+'…';
+    if(!(window.crypto&&crypto.subtle)){out.textContent='Provenance verify needs a secure (https) context.';return;}
+    out.textContent='Hashing '+file.name+'…';  // textContent, not innerHTML: a hostile file name must not run as markup
     var buf=await file.arrayBuffer();
     var d=new Uint8Array(await crypto.subtle.digest('SHA-256',buf));
     var hex="0x"; for(var i=0;i<d.length;i++) hex+=d[i].toString(16).padStart(2,"0");

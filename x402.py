@@ -183,18 +183,16 @@ class X402Middleware:
             for m in buffered:
                 await send(m)
             return
-        # Render succeeded -> capture funds BEFORE delivering. Retry a couple of times so a
-        # transient facilitator hiccup doesn't deny a paying caller their render.
-        settled, sresult = False, {}
-        for attempt in range(3):
-            settled, sresult = await asyncio.to_thread(settle, xp, resource)  # capture on X Layer
-            if settled:
-                break
-            if attempt < 2:
-                await asyncio.sleep(1.5 * (attempt + 1))
-        if not settled:  # compute is spent, but withhold the paid artifact — never give a free render
-            return await reject(f"render complete but payment could not be settled "
-                                f"({sresult.get('error', 'settlement rejected')}); you were not charged")
+        # Render succeeded -> capture funds BEFORE delivering. SINGLE attempt, no retry: the
+        # x402 authorization is single-use (EIP-3009 nonce), so re-submitting a settle whose
+        # HTTP response was merely lost risks a double-capture or a false "nonce already used"
+        # failure on a payment that actually landed.
+        settled, sresult = await asyncio.to_thread(settle, xp, resource)  # capture on X Layer
+        if not settled:  # compute is spent, but withhold the paid artifact — never give a free render.
+            # Don't claim "not charged": a timed-out settle may have landed on-chain.
+            return await reject(f"render complete but settlement was not confirmed "
+                                f"({sresult.get('error', 'settlement rejected')}); "
+                                "check your wallet before retrying to avoid a double payment")
         xpr = base64.b64encode(json.dumps(sresult).encode())  # on-chain proof (tx hash)
         for m in buffered:
             if m["type"] == "http.response.start":

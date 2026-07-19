@@ -106,7 +106,9 @@ def validate_plan(plan: dict) -> dict:
     shots = plan.get("shots")
     if not isinstance(shots, list) or not shots:
         raise ValueError("plan has no shots")
-    shots = shots[:MAX_SHOTS]  # cost cap: truncate a runaway list, don't fail the render
+    # coerce non-dict elements to {} (they self-heal below) so a malformed shot_list like
+    # {"shots": ["a", 2]} can't AttributeError and sink a paid render; then cost-cap the list.
+    shots = [s if isinstance(s, dict) else {} for s in shots][:MAX_SHOTS]
     title = str(plan.get("title") or "Untitled animatic")
     subject = str(plan.get("subject") or "")
     for i, s in enumerate(shots):
@@ -367,10 +369,12 @@ def _placeholder_frame(out: str, w: int, h: int) -> None:
     _run([FFMPEG, "-y", "-f", "lavfi", "-i", f"color=c=0x1a1206:s={w}x{h}:d=1", "-frames:v", "1", out])
 
 def _font_file() -> str | None:
-    """A TTF for drawtext captions. python:3.12-slim ships no fonts, so the Dockerfile
-    installs fonts-dejavu-core; locally fall back to a common system font. Override
-    with DALANG_FONT. Returns None if none found -> captions skip gracefully."""
-    cands = [os.environ.get("DALANG_FONT"),
+    """A TTF for drawtext captions/cards. The repo bundles DejaVuSans-Bold so it works
+    everywhere — including serverless (Vercel) which has NO system fonts, where without
+    this the flagship bookend text + captions would silently vanish. Override with
+    DALANG_FONT; falls back to system DejaVu/Arial. None -> text skips gracefully."""
+    bundled = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "fonts", "DejaVuSans-Bold.ttf")
+    cands = [os.environ.get("DALANG_FONT"), bundled,
              "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
              "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
              "C:/Windows/Fonts/arialbd.ttf", "C:/Windows/Fonts/arial.ttf"]
@@ -417,8 +421,9 @@ def build_clip_from_video(video_in: str, w: int, h: int, audio: str | None,
                           out: str, caption: str = "") -> None:
     """Cinematic tier: fit a generated motion clip to the WxH canvas (same blurred
     cover-fill as the stills path, no crop) + burned-in caption. Uses narration `audio`
-    when given, else the clip's own soundtrack. Trimmed to VID_SECS so the timeline
-    matches the shot list (short narration -> trailing silence, like the stills path)."""
+    when given, else a SILENT track (not the clip's own soundtrack) — a Venice clip may
+    have no audio stream, and mixing present/absent audio across clips breaks the concat
+    demuxer on the strict linux ffmpeg. Trimmed to VID_SECS to match the shot list."""
     long = max(w, h)
     vf = (f"scale={long}:{long}:force_original_aspect_ratio=decrease,split=2[bg][fg];"
           f"[bg]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},"
@@ -427,9 +432,11 @@ def build_clip_from_video(video_in: str, w: int, h: int, audio: str | None,
           f"[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1,format=yuv420p"
           + _caption_filter(caption, w, h, out + ".cap.txt"))
     cmd = [FFMPEG, "-y", "-i", video_in]
-    if audio:  # replace the clip's own audio with the narration track
-        cmd += ["-i", audio, "-map", "0:v", "-map", "1:a"]
-    cmd += ["-t", str(VID_SECS), "-vf", vf, "-r", "30",
+    if audio:  # narration track
+        cmd += ["-i", audio]
+    else:  # silent track so EVERY clip has uniform aac 44.1k stereo audio (concat-safe)
+        cmd += ["-f", "lavfi", "-t", str(VID_SECS), "-i", "anullsrc=r=44100:cl=stereo"]
+    cmd += ["-map", "0:v", "-map", "1:a", "-t", str(VID_SECS), "-vf", vf, "-r", "30",
             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "26",
             "-c:a", "aac", "-ar", "44100", "-ac", "2", out]
     _run(cmd)
@@ -722,6 +729,8 @@ def demo() -> None:
     # self-heal (money path): an LLM omitting image_prompt on a shot must NOT fail a paid render
     healed = validate_plan({"subject": "a red mug", "shots": [{"voiceover": "hi", "seconds": 3}]})
     assert healed["shots"][0]["image_prompt"] == "a red mug"  # falls back to the subject
+    nd = validate_plan({"subject": "S", "shots": ["oops", {"seconds": 2}]})  # non-dict element
+    assert len(nd["shots"]) == 2 and nd["shots"][0]["image_prompt"] == "S"   # coerced, not crashed
     assert validate_plan({"shots": [{"seconds": 99}]})["shots"][0]["seconds"] == 15  # clamped, not raised
     assert validate_plan({"shots": [{"seconds": "bad"}]})["shots"][0]["seconds"] == 3  # non-numeric -> default
     assert len(validate_plan({"shots": [{"image_prompt": "x"}] * 15})["shots"]) == MAX_SHOTS  # truncated to cap
