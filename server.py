@@ -77,6 +77,8 @@ def generate_animatic(
     template: str = "",
     shot_list: dict | None = None,
     cinematic: bool = False,
+    bookends: bool = False,
+    music: str = "",
     mint: bool = False,
     parent_cid: str = "",
     royalties: list | None = None,
@@ -103,6 +105,9 @@ def generate_animatic(
             directly, skipping the LLM — for agents that own the storyboard step.
         cinematic: PREMIUM real-motion tier — animate each shot with image-to-video
             (~$0.55/shot) instead of stills + Ken Burns. Price this call accordingly.
+        bookends: add a branded title card + DALANG end card so the clip reads as a film.
+        music: score under the video — "auto" (mood from style) or warm/tense/upbeat/noir,
+            "" = none. Ducked under narration; pairs with voiceover/bookends for a full bed.
         mint: also return ERC-721 metadata (image, animation_url, attributes) so the
             caller can mint the animatic as an NFT on X Layer.
         parent_cid: the content_cid this render remixes — records on-chain remix lineage
@@ -134,7 +139,8 @@ def generate_animatic(
         target_seconds = max(8, min(90, int(target_seconds)))  # inside try: a bad value
         result = render(brief, style, aspect_ratio, target_seconds, voiceover, workdir,  # returns {error}, never raises
                         consistent, captions, voice, language, template, shot_list,
-                        motion_engine="video" if cinematic else "kenburns")
+                        motion_engine="video" if cinematic else "kenburns",
+                        bookends=bookends, music=music)
         size = os.path.getsize(result["animatic"])
         with open(result["animatic"], "rb") as f:
             video = f.read()

@@ -128,11 +128,11 @@ def _srt_time(t: float) -> str:
     s, ms = divmod(ms, 1_000)
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
-def build_srt(plan: dict) -> str:
+def build_srt(plan: dict, offset: float = 0.0) -> str:
     """SRT soft-subs from the shot list — editable captions to complement the burned-in
     ones. Timing uses max(sec,0.5) to match the actual clip length; silent shots advance
-    the clock but emit no cue."""
-    out, t, n = [], 0.0, 0
+    the clock but emit no cue. offset shifts every cue (e.g. a prepended title card)."""
+    out, t, n = [], float(offset), 0
     for s in plan["shots"]:
         dur = max(float(s["seconds"]), 0.5)
         text = " ".join(str(s.get("voiceover", "")).split())
@@ -438,6 +438,77 @@ def assemble(clips: list[str], out: str) -> None:
     finally:
         os.unlink(listfile)  # don't leak the concat list in system temp if ffmpeg fails
 
+# ---------- Score + Sting: title/end cards + a music bed ----------
+
+TITLE_SEC = float(os.environ.get("DALANG_TITLE_SEC", 1.6))
+END_SEC = float(os.environ.get("DALANG_END_SEC", 2.2))
+_BRAND_BG, _BRAND_GOLD = "0x140d06", "0xC8A45A"  # DALANG dark + gold
+
+def _draw(textfile: str, font: str, fs: int, color: str, y: str, extra: str = "") -> str:
+    esc = lambda p: p.replace("\\", "/").replace(":", r"\:")
+    return (f",drawtext=textfile='{esc(textfile)}':fontfile='{esc(font)}':expansion=none:"
+            f"fontsize={fs}:fontcolor={color}:x=(w-text_w)/2:y={y}{extra}")
+
+def build_bookend(title: str, subtitle: str, sec: float, w: int, h: int, out: str,
+                  gold_title: bool = False) -> None:
+    """A branded card (dark bg + centered title + gold subtitle, fade in/out) with a
+    silent audio track so it concats with narrated clips and carries a music bed.
+    Text is best-effort: no font on the host -> a clean colored card, never a failure."""
+    font = _font_file()
+    draws = ""
+    if font and title:
+        tf = out + ".t.txt"
+        with open(tf, "w", encoding="utf-8") as f:
+            f.write("\n".join(textwrap.wrap(title, 20)[:3]))
+        draws += _draw(tf, font, max(24, round(h * 0.056)), _BRAND_GOLD if gold_title else "white",
+                       "(h-text_h)/2-h*0.03", ":borderw=0:line_spacing=14")
+        if subtitle:
+            sf = out + ".s.txt"
+            with open(sf, "w", encoding="utf-8") as f:
+                f.write(" ".join(subtitle.split())[:60])
+            draws += _draw(sf, font, max(16, round(h * 0.023)),
+                           "white" if gold_title else _BRAND_GOLD, "h*0.56")
+    vf = f"format=yuv420p{draws},fade=t=in:st=0:d=0.4,fade=t=out:st={max(0.1, sec - 0.5)}:d=0.5"
+    _run([FFMPEG, "-y", "-f", "lavfi", "-i", f"color=c={_BRAND_BG}:s={w}x{h}:d={sec}",
+          "-f", "lavfi", "-t", str(sec), "-i", "anullsrc=r=44100:cl=stereo",
+          "-vf", vf, "-r", "30", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+          "-preset", "veryfast", "-crf", "26", "-c:a", "aac", "-shortest", out])
+
+MUSIC_MOODS = {"warm", "tense", "upbeat", "noir"}
+_STYLE_MOOD = {"cinematic": "warm", "anime": "upbeat", "noir": "noir", "watercolor": "warm",
+               "claymation": "upbeat", "storybook": "warm", "3d": "upbeat"}
+
+def resolve_bed(music: str, style: str) -> str | None:
+    """Map a `music` request to a bed file (or None=off). ''/'none'/'off' -> off;
+    an existing file path -> that track; 'auto' -> a mood from the style preset; a mood
+    name (warm/tense/upbeat/noir) -> DALANG_MUSIC_DIR/<mood>.mp3 then the bundled bed."""
+    m = (music or "").strip()
+    if not m or m.lower() in ("none", "off"):
+        return None
+    if os.path.exists(m):
+        return m
+    ml = m.lower()
+    if ml == "auto":
+        ml = _STYLE_MOOD.get((style or "").strip().lower(), "warm")
+    if ml not in MUSIC_MOODS:
+        return None
+    for d in (os.environ.get("DALANG_MUSIC_DIR"),
+              os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "music")):
+        if d and os.path.exists(os.path.join(d, ml + ".mp3")):
+            return os.path.join(d, ml + ".mp3")
+    return None
+
+def mix_music(video: str, bed: str, out: str) -> None:
+    """Loop the bed under the video and duck it beneath the narration (sidechain
+    compress), then mux (video stream copied). Needs the video to carry an audio
+    stream — narration or a bookend's silence; callers use it best-effort."""
+    _run([FFMPEG, "-y", "-i", video, "-stream_loop", "-1", "-i", bed, "-filter_complex",
+          "[1:a]volume=0.30[bed];"
+          "[bed][0:a]sidechaincompress=threshold=0.02:ratio=8:attack=15:release=380[duck];"
+          "[0:a][duck]amix=inputs=2:duration=first:dropout_transition=2[a]",
+          "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac",
+          "-movflags", "+faststart", out])
+
 def storyboard(brief: str, style: str, aspect: str, target_seconds: int, workdir: str,
                language: str = "", template: str = "") -> dict:
     """Cheap preview tier (~1 LLM + 1 image call, no video): the shot list + a single
@@ -454,7 +525,7 @@ def storyboard(brief: str, style: str, aspect: str, target_seconds: int, workdir
 def render(brief: str, style: str, aspect: str, target_seconds: int, voiceover: bool,
            workdir: str, consistent: bool = True, captions: bool = True, voice: str = "",
            language: str = "", template: str = "", shot_list: dict | None = None,
-           motion_engine: str = "kenburns") -> dict:
+           motion_engine: str = "kenburns", bookends: bool = False, music: str = "") -> dict:
     """Full pipeline. Returns paths + shot list. Caller (MCP tool) owns pricing.
 
     consistent=True: generate a hero frame, then produce every other frame by
@@ -468,6 +539,11 @@ def render(brief: str, style: str, aspect: str, target_seconds: int, voiceover: 
         lets an upstream 'director' agent own the storyboard (agent composability).
     motion_engine: "kenburns" (default, stills + Ken Burns) or "video" (PREMIUM —
         animate each still into real motion via image-to-video, ~$0.55/shot).
+    bookends: prepend a branded title card + append a DALANG end card (makes the clip
+        read as a film, not a tech demo). Adds TITLE_SEC + END_SEC to the duration.
+    music: score under the video — ''/'none' off, 'auto' picks a mood from the style,
+        or a mood name (warm/tense/upbeat/noir) / a file path. Best-effort (needs an
+        audio track: narration or bookends), ducked under narration.
     """
     w, h = dims(aspect)
     plan = (validate_plan(shot_list) if shot_list
@@ -548,14 +624,28 @@ def render(brief: str, style: str, aspect: str, target_seconds: int, voiceover: 
     # video clips run on Venice's queue (I/O-bound), so a wider pool is fine there
     with ThreadPoolExecutor(max_workers=6 if cinematic else 3) as ex:
         clips = list(ex.map(do_clip, zip(shots, frames, auds)))
+    if bookends:  # branded title + end card so the clip reads as a film (Score + Sting)
+        tcard, ecard = os.path.join(workdir, "card_title.mp4"), os.path.join(workdir, "card_end.mp4")
+        build_bookend(plan["title"], subject or brief, TITLE_SEC, w, h, tcard, gold_title=True)
+        build_bookend("DALANG", "storyboard → animatic · on-chain on X Layer", END_SEC, w, h, ecard)
+        clips = [tcard] + clips + [ecard]
     animatic = os.path.join(workdir, "animatic.mp4")
     assemble(clips, animatic)
+    bed = resolve_bed(music, style)
+    if bed:  # best-effort music bed: a no-audio render (no VO, no bookends) just keeps the silent cut
+        scored = os.path.join(workdir, "scored.mp4")
+        try:
+            mix_music(animatic, bed, scored)
+            animatic = scored
+        except Exception:
+            pass
+    extra = (TITLE_SEC + END_SEC) if bookends else 0.0
     shotlist = os.path.join(workdir, "shot_list.json")
     with open(shotlist, "w") as f:
         json.dump(plan, f, indent=2)
     return {"title": plan["title"], "animatic": animatic, "frames": frames,
-            "shot_list": shotlist, "duration_seconds": total_seconds(plan),
-            "srt": build_srt(plan)}
+            "shot_list": shotlist, "duration_seconds": round(total_seconds(plan) + extra, 2),
+            "srt": build_srt(plan, offset=TITLE_SEC if bookends else 0.0)}
 
 # ---------- self-check (no network / no ffmpeg needed) ----------
 
@@ -590,6 +680,11 @@ def demo() -> None:
     assert "1\n00:00:00,000 --> 00:00:03,000\nFirst line." in srt
     assert "2\n00:00:05,000 --> 00:00:07,500\nThird line." in srt  # 3+2 silent -> starts at 5s
     assert _srt_time(3661.5) == "01:01:01,500"
+    assert resolve_bed("", "cinematic") is None and resolve_bed("none", "anime") is None  # off
+    assert resolve_bed("zzz", "cinematic") is None      # unknown mood -> off (not a crash)
+    assert _STYLE_MOOD["noir"] == "noir" and _STYLE_MOOD["anime"] == "upbeat"  # auto maps style->mood
+    assert build_srt({"shots": [{"voiceover": "hi", "seconds": 2}]}, offset=1.6).startswith(
+        "1\n00:00:01,600 -->")                          # title card shifts every cue
     assert _caption_filter("", 1080, 1920, "unused.txt") == ""  # no text -> no drawtext, no write
     if _font_file():  # where a font exists, a caption compiles to a drawtext with safe escaping
         cf = _caption_filter("Colons: and 'quotes' are fine.", 1080, 1920,

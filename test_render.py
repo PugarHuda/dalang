@@ -90,6 +90,17 @@ def main():
     check("captions=False renders", os.path.exists(res["animatic"]))
     shutil.rmtree(d, ignore_errors=True)
 
+    print("\n== Score + Sting: bookends + music bed ==")
+    res, d = render_tmp(aspect="9:16", style="anime", bookends=True, music="auto")
+    dur = _duration(res["animatic"])
+    check("bookends add title+end cards to duration",  # 7.5 shots + 1.6 title + 2.2 end
+          abs(dur - (7.5 + pipeline.TITLE_SEC + pipeline.END_SEC)) < 0.8, f"{dur:.2f}s")
+    check("scored render has video+audio", set(_stream_types(res["animatic"])) >= {"video", "audio"})
+    check("srt cues shift by the title card", res["srt"].startswith("1\n00:00:01,600 -->"))
+    check("music bed was mixed in (scored.mp4 used)", res["animatic"].endswith("scored.mp4"))
+    check("reported duration includes bookends", abs(res["duration_seconds"] - (7.5 + pipeline.TITLE_SEC + pipeline.END_SEC)) < 0.1)
+    shutil.rmtree(d, ignore_errors=True)
+
     print("\n== cinematic tier (motion_engine=video, stubbed gen_video) ==")
     def fake_video(frame, image_prompt, motion, out, **kw):  # real dummy motion clip, no API
         subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=s=720x1280:d=5:r=30",

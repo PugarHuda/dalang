@@ -50,6 +50,11 @@ title/voiceover in another language (non-Latin scripts need a caption font via `
 The result includes a `poster_data_uri` (hero frame) for thumbnails/`og:image` and an
 `srt` subtitle track (editable soft-subs) alongside the burned-in captions.
 
+**Score + Sting** — `bookends=True` wraps the clip in a branded title card + DALANG end
+card; `music="auto"` (or `warm`/`tense`/`upbeat`/`noir`) scores it with a ducked music bed
+(bundled beds in `assets/music/`, override via `DALANG_MUSIC_DIR`). Together they turn a
+silent tech demo into something that reads as a film — the biggest muted-autoplay lever.
+
 **Agent composability:** pass a ready-made `shot_list` (the same JSON the tool returns)
 to render it directly and skip the LLM — so an upstream "director" agent can own the
 storyboard and call DALANG purely as the render primitive.
@@ -81,9 +86,12 @@ Every render returns on-chain-ready provenance (dep-free, deterministic, no RPC)
   ready to pin + mint on an ERC-721 you deploy on X Layer (this repo ships the metadata and
   the ERC-20 credit token, not the NFT contract). On-chain EIP-2981 needs `royaltyInfo()` on
   that contract; the metadata carries the intent.
+- `parent_cid=...` → **remix lineage**: the manifest records the CID this render descends
+  from, and the tamper-evident `provenance_digest` covers it — a verifiable on-chain remix
+  DAG. `royalties=[{recipient, bps}, …]` → every agent that co-created the video co-owns it.
 
 So the full agentic loop closes on-chain: an agent **pays** per render (x402 on X Layer)
-and receives a **provably-authored, mint-ready** creative asset. See `provenance.py`.
+and receives a **provably-authored, mint-ready, co-owned** creative asset. See `provenance.py`.
 
 ## Repository layout
 ```
