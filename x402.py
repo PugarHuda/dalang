@@ -178,12 +178,25 @@ class X402Middleware:
         # for the absence of "error" — that string is caller-controllable (a voiceover/title
         # of "error"), which would let a caller dodge settlement and replay for free renders.
         resp_body = b"".join(m.get("body", b"") for m in buffered if m["type"] == "http.response.body")
-        if 200 <= status < 300 and b"content_sha256" in resp_body:
+        rendered_ok = 200 <= status < 300 and b"content_sha256" in resp_body
+        if not rendered_ok:  # guard/render error -> serve it, never settle (no charge on failure)
+            for m in buffered:
+                await send(m)
+            return
+        # Render succeeded -> capture funds BEFORE delivering. Retry a couple of times so a
+        # transient facilitator hiccup doesn't deny a paying caller their render.
+        settled, sresult = False, {}
+        for attempt in range(3):
             settled, sresult = await asyncio.to_thread(settle, xp, resource)  # capture on X Layer
-            if settled:  # attach on-chain proof (tx hash) so the caller can verify payment
-                xpr = base64.b64encode(json.dumps(sresult).encode())
-                for m in buffered:
-                    if m["type"] == "http.response.start":
-                        m["headers"] = list(m.get("headers", [])) + [(b"x-payment-response", xpr)]
-        for m in buffered:  # flush the render's response (success or the error) to the caller
-            await send(m)
+            if settled:
+                break
+            if attempt < 2:
+                await asyncio.sleep(1.5 * (attempt + 1))
+        if not settled:  # compute is spent, but withhold the paid artifact — never give a free render
+            return await reject(f"render complete but payment could not be settled "
+                                f"({sresult.get('error', 'settlement rejected')}); you were not charged")
+        xpr = base64.b64encode(json.dumps(sresult).encode())  # on-chain proof (tx hash)
+        for m in buffered:
+            if m["type"] == "http.response.start":
+                m["headers"] = list(m.get("headers", [])) + [(b"x-payment-response", xpr)]
+            await send(m)  # flush the paid render to the caller

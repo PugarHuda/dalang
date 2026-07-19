@@ -32,11 +32,11 @@ import tokengate   # X Layer token-gating (opt-in via DALANG_TOKENGATE_CONTRACT)
 from pipeline import render, storyboard as _storyboard  # imported after .env load
 
 # A remote A2MCP caller can't read the host FS, so the video is delivered inline as a
-# data URI. Default cap is serverless-safe: Vercel caps a function response at ~4.5 MB
-# and base64 inflates ~33%, so keep inline bytes under ~3.3 MB there. Containers can
-# raise DALANG_MAX_INLINE_BYTES. Over the cap, if object storage is configured
-# (DALANG_UPLOAD_ENDPOINT) the mp4 is uploaded and a URL returned instead.
-MAX_INLINE_BYTES = int(os.environ.get("DALANG_MAX_INLINE_BYTES", 3_300_000))
+# base64 data URI inside the JSON response. Vercel caps a function response at ~4.5 MB,
+# so the WHOLE inline body (base64 video + poster + srt) must stay under that. Over the
+# cap, if object storage is configured (DALANG_UPLOAD_ENDPOINT) the mp4 is uploaded and a
+# URL returned instead. Containers with no such cap can raise DALANG_MAX_RESPONSE_BYTES.
+MAX_RESPONSE_BYTES = int(os.environ.get("DALANG_MAX_RESPONSE_BYTES", 4_300_000))
 ROYALTY_BPS = int(os.environ.get("DALANG_ROYALTY_BPS", 0))       # e.g. 500 = 5%
 ROYALTY_RECIPIENT = os.environ.get("DALANG_ROYALTY_RECIPIENT", "")
 
@@ -78,6 +78,8 @@ def generate_animatic(
     shot_list: dict | None = None,
     cinematic: bool = False,
     mint: bool = False,
+    parent_cid: str = "",
+    royalties: list | None = None,
     wallet: str = "",
     access_key: str = "",
 ) -> dict:
@@ -103,6 +105,10 @@ def generate_animatic(
             (~$0.55/shot) instead of stills + Ken Burns. Price this call accordingly.
         mint: also return ERC-721 metadata (image, animation_url, attributes) so the
             caller can mint the animatic as an NFT on X Layer.
+        parent_cid: the content_cid this render remixes — records on-chain remix lineage
+            (a verifiable descendant link) in the provenance manifest + digest.
+        royalties: co-creator split for the NFT, [{"recipient": "0x..", "bps": 250}, ...] —
+            every agent that helped make the video co-owns it (OpenSea off-chain hints).
         wallet: caller's X Layer address — required only if the server sets
             DALANG_TOKENGATE_CONTRACT (renders gated to holders of that token/NFT).
         access_key: required only if the server sets DALANG_ACCESS_KEY.
@@ -143,10 +149,13 @@ def generate_animatic(
         # content_cid — it's the exact-bytes CIDv1, a fingerprint, not a pinned DAG root).
         out["content_sha256"] = provenance.content_sha256(video)
         out["content_cid"] = provenance.content_cid(video)
-        # Delivery: over the cap, offload to object storage if configured (beats the
-        # serverless response cap); else embed inline (the only channel on a bare host).
+        # Delivery: weigh the WHOLE inline payload (base64 video ~4/3 + the poster PNG +
+        # srt all ride in the JSON body) against the serverless response cap — gating on the
+        # raw video alone under-counts and a passing video + poster can still blow the limit.
+        inline_est = (size + 2) // 3 * 4 + len(out.get("poster_data_uri", "")) + len(out.get("srt", "")) + 2000
+        too_big = inline_est > MAX_RESPONSE_BYTES
         uploaded = None
-        if size > MAX_INLINE_BYTES:
+        if too_big:  # over the cap: offload to object storage if configured
             try:  # a storage blip must not discard a good, expensive render -> fall back inline
                 uploaded = _upload_mp4(video, f"{result['title'][:40] or 'animatic'}-{uuid.uuid4().hex[:8]}.mp4")
             except Exception:
@@ -155,15 +164,17 @@ def generate_animatic(
             out["animatic_url"] = uploaded
         else:
             out["animatic_data_uri"] = "data:video/mp4;base64," + base64.b64encode(video).decode()
-            if size > MAX_INLINE_BYTES:
-                out["warning"] = (f"animatic {size} bytes exceeds inline cap ({MAX_INLINE_BYTES}) and no "
-                                  "DALANG_UPLOAD_ENDPOINT is set; this response may exceed a serverless body limit")
+            if too_big:
+                out["warning"] = (f"inline response ~{inline_est} bytes may exceed the serverless body "
+                                  f"limit (~{MAX_RESPONSE_BYTES}); set DALANG_UPLOAD_ENDPOINT to offload the mp4")
         # animation_url for minting: a resolvable URL or the self-contained data URI —
         # never ipfs://<content_cid> (that CID is a fingerprint, won't resolve once chunk-pinned).
         media_url = out.get("animatic_url") or out.get("animatic_data_uri", "")
         # Proof-of-creation: a tamper-evident manifest; anchor manifest_digest on X Layer.
+        # parent_cid (if a remix) records verifiable on-chain lineage.
         manifest = provenance.provenance_manifest(out["title"], out["content_sha256"], out["content_cid"],
-                                                  int(time.time()), "cinematic" if cinematic else "Ken Burns")
+                                                  int(time.time()), "cinematic" if cinematic else "Ken Burns",
+                                                  parent_cid=(parent_cid or "").strip())
         out["provenance_manifest"] = manifest
         out["provenance_digest"] = provenance.manifest_digest(manifest)
         if mint:  # ERC-721 metadata ready to pin + mint on X Layer (with optional royalties)
@@ -173,7 +184,8 @@ def generate_animatic(
                 {"Style": style, "Aspect": aspect_ratio, "Shots": len(out["shots"]),
                  "Duration (s)": out["duration_seconds"],
                  "Engine": "cinematic" if cinematic else "Ken Burns", "Language": language},
-                out["content_sha256"], out["content_cid"], ROYALTY_BPS, ROYALTY_RECIPIENT)
+                out["content_sha256"], out["content_cid"], ROYALTY_BPS, ROYALTY_RECIPIENT,
+                royalties=royalties)
         if KEEP_FILES:  # local debugging keeps the files + paths
             out.update({k: result[k] for k in ("animatic", "frames", "shot_list")})
         return out

@@ -71,10 +71,16 @@ OKX's ecosystem — the render engine is portable, the *on-chain metered billing
 ## Web3 provenance & NFT-ready output
 Every render returns on-chain-ready provenance (dep-free, deterministic, no RPC):
 - `content_sha256` — a `0x…` SHA-256 fingerprint of the exact animatic bytes.
-- `content_cid` — a CIDv1 (raw codec, sha2-256, `bafkrei…`) — a real IPFS content id;
-  pin the mp4 and it resolves to the same address, so authorship is verifiable.
-- `mint=True` → `nft_metadata`: OpenSea/ERC-721 metadata (image, animation_url,
-  attributes: style/aspect/shots/duration/engine/language) ready to pin + mint on X Layer.
+- `content_cid` — a CIDv1 (raw codec, sha2-256, `bafkrei…`) content fingerprint. It equals
+  the `ipfs add --raw-leaves` CID for single-block files (≤256 KiB); a full mp4 gets chunked
+  into a different UnixFS DAG root, so treat this as the **exact-bytes fingerprint**, not a
+  resolvable pin address. (Anyone can recompute it from the bytes to verify authorship.)
+- `mint=True` → `nft_metadata`: OpenSea/ERC-721 metadata (image, animation_url, attributes:
+  style/aspect/shots/duration/engine/language), plus off-chain royalty hints
+  (`seller_fee_basis_points`) and, if you pass `royalties=[...]`, a co-creator **split** —
+  ready to pin + mint on an ERC-721 you deploy on X Layer (this repo ships the metadata and
+  the ERC-20 credit token, not the NFT contract). On-chain EIP-2981 needs `royaltyInfo()` on
+  that contract; the metadata carries the intent.
 
 So the full agentic loop closes on-chain: an agent **pays** per render (x402 on X Layer)
 and receives a **provably-authored, mint-ready** creative asset. See `provenance.py`.

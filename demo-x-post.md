@@ -26,9 +26,10 @@ Live ASP endpoint: `https://dalang-engine.vercel.app/mcp` · Landing: (Vercel) �
 >    the calling agent's OKX Agentic Wallet auto-pays per render, settled in USDT/USDG on
 >    **X Layer** — gas-free, instant, no escrow.
 >
-> 4/ Every output is **Web3-native**: a content fingerprint + IPFS CID + a tamper-evident
->    **proof-of-creation** you can anchor on X Layer, plus **ERC-721 metadata** (with EIP-2981
->    royalties) so any animatic is mint-ready. Authenticity in the age of AI slop.
+> 4/ Every output is **Web3-native**: a content fingerprint (SHA-256 + CIDv1) + a
+>    tamper-evident **proof-of-creation** you can anchor on X Layer, plus **ERC-721 metadata**
+>    with co-creator **royalty splits** so any animatic is mint-ready. Authenticity in the age
+>    of AI slop.
 >
 > 5/ It's **composable**: another agent can hand DALANG a `shot_list` and use it as a pure
 >    render primitive. A trend-agent → copywriter-agent → **DALANG** → distribution-agent

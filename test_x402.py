@@ -91,9 +91,10 @@ def main():
         scope = {"type": "http", "method": "POST", "path": "/mcp", "scheme": "https",
                  "headers": [(b"host", b"d"), (b"x-payment", xp.encode())]}
         async def rcv(): return {"type": "http.request", "body": json.dumps(paid).encode(), "more_body": False}
-        got = {}
+        got = {"body": b""}
         async def snd(m):
             if m["type"] == "http.response.start": got["status"] = m["status"]
+            if m["type"] == "http.response.body": got["body"] += m.get("body", b"")
         asyncio.new_event_loop().run_until_complete(mw(scope, rcv, snd))
         return got, len(settled_calls)
 
@@ -103,6 +104,12 @@ def main():
     # BYPASS ATTEMPT: a successful render whose voiceover is literally "error" -> MUST settle
     got, n = _drive(b'{"content_sha256":"0xok","shots":[{"voiceover":"error"}]}')
     check("caller-controlled 'error' text can't dodge settlement", got["status"] == 200 and n == 1)
+
+    # SETTLE FAILS on a good render -> artifact WITHHELD (402), not given away for free
+    x402.settle = lambda hdr, res: (False, {"error": "insufficient balance"})
+    got, n = _drive(b'{"content_sha256":"0xreal","animatic_data_uri":"data:video/mp4;base64,AAAA"}')
+    check("settle fails -> 402 (artifact withheld, no free render)", got["status"] == 402)
+    check("withheld response does not leak the paid video bytes", b"0xreal" not in got["body"])
 
     print("\n" + ("test_x402: ALL PASSED" if not FAILS else f"test_x402 FAILURES: {FAILS}"))
     return 1 if FAILS else 0
