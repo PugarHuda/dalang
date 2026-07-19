@@ -13,8 +13,13 @@ The surrounding agents are stubbed (an LLM call each in reality); the DALANG ren
 REAL — it hits the deployed ASP and returns an actual animatic + on-chain provenance.
 Payments are illustrated (in production the OKX Agentic Wallet auto-pays via x402).
 """
-import asyncio, os
+import asyncio, os, sys
 from fastmcp import Client
+
+try:  # the emoji/arrows below need UTF-8; a Windows cp1252 console would crash on them
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
 
 MCP_URL = os.environ.get("DALANG_MCP_URL", "https://dalang-engine.vercel.app/mcp")
 

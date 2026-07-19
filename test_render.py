@@ -84,7 +84,10 @@ def main():
 
     print("\n== toggles ==")
     res, d = render_tmp(voiceover=False, consistent=False, captions=True)
-    check("voiceover=False -> no audio, still renders", "audio" not in _stream_types(res["animatic"]))
+    # every clip carries a uniform (silent) audio track so the concat demuxer never trips
+    # on mixed streams across platforms (the linux static ffmpeg is stricter than Windows).
+    check("voiceover=False -> renders with a uniform silent audio track",
+          os.path.exists(res["animatic"]) and "audio" in _stream_types(res["animatic"]))
     shutil.rmtree(d, ignore_errors=True)
     res, d = render_tmp(aspect="1:1", captions=False)
     check("captions=False renders", os.path.exists(res["animatic"]))
@@ -124,7 +127,8 @@ def main():
     def boom(*a, **k): raise RuntimeError("venice down")
     pipeline.tts = boom
     res, d = render_tmp(captions=True)
-    check("raising TTS -> silent shot, render survives", os.path.exists(res["animatic"]) and "audio" not in _stream_types(res["animatic"]))
+    check("raising TTS -> silent shot, render survives (uniform silent audio)",
+          os.path.exists(res["animatic"]) and "audio" in _stream_types(res["animatic"]))
     shutil.rmtree(d, ignore_errors=True)
     pipeline.tts = fake_tts
     pipeline.edit_image = boom

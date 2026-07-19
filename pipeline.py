@@ -350,7 +350,10 @@ def _resolve_ffmpeg() -> str:
 FFMPEG = _resolve_ffmpeg()
 
 def _run(cmd: list[str]) -> None:
-    subprocess.run(cmd, check=True, capture_output=True)
+    r = subprocess.run(cmd, capture_output=True)
+    if r.returncode != 0:  # surface ffmpeg's stderr tail — else the paid boundary returns a
+        tail = r.stderr.decode("utf-8", "replace").strip().splitlines()[-4:]  # useless "Command [...]"
+        raise RuntimeError(f"ffmpeg failed (exit {r.returncode}): {' | '.join(tail)}")
 
 def _placeholder_frame(out: str, w: int, h: int) -> None:
     """A solid dark frame so one failed shot can't sink a whole paid render."""
@@ -393,13 +396,14 @@ def build_clip(img: str, sec: float, motion: str, w: int, h: int,
     cmd = [FFMPEG, "-y", "-loop", "1", "-i", img]
     if audio:
         cmd += ["-i", audio]
+    else:  # silent track so EVERY clip has audio -> the concat demuxer never trips on a
+        cmd += ["-f", "lavfi", "-t", str(max(sec, 0.5)), "-i", "anullsrc=r=44100:cl=stereo"]  # mix of streams
     # -t (not -shortest): clip is exactly `sec`; short VO leaves trailing silence,
     # so total duration matches the shot list instead of the voiceover length.
+    # Uniform aac 44.1k stereo so every clip's audio matches for the concat demuxer.
     cmd += ["-t", str(max(sec, 0.5)), "-vf", vf, "-r", "30",
-            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "26"]
-    if audio:
-        cmd += ["-c:a", "aac"]
-    cmd += [out]
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "26",
+            "-c:a", "aac", "-ar", "44100", "-ac", "2", out]
     _run(cmd)
 
 def build_clip_from_video(video_in: str, w: int, h: int, audio: str | None,
@@ -420,7 +424,7 @@ def build_clip_from_video(video_in: str, w: int, h: int, audio: str | None,
         cmd += ["-i", audio, "-map", "0:v", "-map", "1:a"]
     cmd += ["-t", str(VID_SECS), "-vf", vf, "-r", "30",
             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "26",
-            "-c:a", "aac", out]
+            "-c:a", "aac", "-ar", "44100", "-ac", "2", out]
     _run(cmd)
 
 def assemble(clips: list[str], out: str) -> None:
@@ -468,11 +472,13 @@ def build_bookend(title: str, subtitle: str, sec: float, w: int, h: int, out: st
                 f.write(" ".join(subtitle.split())[:60])
             draws += _draw(sf, font, max(16, round(h * 0.023)),
                            "white" if gold_title else _BRAND_GOLD, "h*0.56")
-    vf = f"format=yuv420p{draws},fade=t=in:st=0:d=0.4,fade=t=out:st={max(0.1, sec - 0.5)}:d=0.5"
+    # setsar=1 matches the shot clips (zoompan sets it) so the concat demuxer's video params line up
+    vf = f"format=yuv420p,setsar=1{draws},fade=t=in:st=0:d=0.4,fade=t=out:st={max(0.1, sec - 0.5)}:d=0.5"
     _run([FFMPEG, "-y", "-f", "lavfi", "-i", f"color=c={_BRAND_BG}:s={w}x{h}:d={sec}",
           "-f", "lavfi", "-t", str(sec), "-i", "anullsrc=r=44100:cl=stereo",
           "-vf", vf, "-r", "30", "-c:v", "libx264", "-pix_fmt", "yuv420p",
-          "-preset", "veryfast", "-crf", "26", "-c:a", "aac", "-shortest", out])
+          "-preset", "veryfast", "-crf", "26", "-c:a", "aac", "-ar", "44100", "-ac", "2",
+          "-shortest", out])
 
 MUSIC_MOODS = {"warm", "tense", "upbeat", "noir"}
 _STYLE_MOOD = {"cinematic": "warm", "anime": "upbeat", "noir": "noir", "watercolor": "warm",
