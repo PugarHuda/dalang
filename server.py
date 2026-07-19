@@ -202,6 +202,30 @@ def generate_animatic(
             shutil.rmtree(workdir, ignore_errors=True)
 
 @mcp.tool
+def quote(target_seconds: int = 30, cinematic: bool = False) -> dict:
+    """Price discovery for an agent BEFORE it commits — no render, no payment, free.
+    Lets a buyer agent learn the price and scope (and compare ASPs) without initiating a
+    paid call — the OKX A2MCP market in miniature. The premium cinematic tier is priced
+    per animated shot; Ken Burns is the flat list price.
+
+    Args:
+        target_seconds: rough length (8-90); shot count scales with it up to a cap.
+        cinematic: PREMIUM real-motion tier (~$0.55/shot) vs flat-priced Ken Burns stills.
+    Returns the shot count, engine, and the USD price the caller pays (x402 · X Layer).
+    """
+    from pipeline import shot_budget, MAX_VIDEO_SHOTS, MAX_SHOTS
+    t = max(8, min(90, int(target_seconds)))
+    n_shots = min(MAX_SHOTS, shot_budget(t)[0])
+    flat = round(int(os.environ.get("DALANG_X402_AMOUNT", "490000")) / 1_000_000, 2)  # list price (6dp USDT)
+    # cinematic is metered per animated shot (~$0.55 Venice cost + margin), so a flat price
+    # can't cover it — quote a cost-plus figure the operator can meter via x402 per call.
+    price = round(min(n_shots, MAX_VIDEO_SHOTS) * 0.79, 2) if cinematic else flat
+    return {"shots": n_shots, "engine": "cinematic" if cinematic else "kenburns",
+            "price_usd": price, "currency": "USDT",
+            "network": os.environ.get("DALANG_X402_NETWORK", "x-layer"),
+            "settlement": "x402 · X Layer", "note": "call generate_animatic to render (this quote is free)"}
+
+@mcp.tool
 def storyboard(
     brief: str,
     style: str = "cinematic, warm color grade, shallow depth of field",

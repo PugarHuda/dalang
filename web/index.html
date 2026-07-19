@@ -147,6 +147,17 @@
     </div>
   </section>
 
+  <section id="verify">
+    <div class="kicker">Authenticity in the age of AI slop</div>
+    <h2>Verify provenance in your browser</h2>
+    <p style="color:var(--muted);max-width:62ch;margin-top:0">Every render returns a content fingerprint — a SHA-256 and a CIDv1 (<code>bafkrei…</code>). Drop a DALANG animatic below and this page recomputes them <b>locally</b> (nothing is uploaded), so you can confirm the exact authored bytes and match the <code>content_cid</code> anchored on X Layer.</p>
+    <div class="card">
+      <input id="vfile" type="file" accept="video/mp4,video/*" style="color:var(--muted);max-width:100%">
+      <div id="vout" style="margin-top:14px;color:var(--muted);font-size:14px">Choose an .mp4 to fingerprint it.</div>
+      <input id="vexp" placeholder="optional: paste an expected content_cid or content_sha256 to check a match" style="margin-top:12px;width:100%;background:#0b0a09;border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:10px;font-family:ui-monospace,monospace;font-size:13px">
+    </div>
+  </section>
+
   <section>
     <div class="kicker">Under the hood</div>
     <h2>One key, three model types</h2>
@@ -171,5 +182,35 @@
   </footer>
 
 </div>
+<script>
+// Provenance verifier — recomputes DALANG's content_sha256 + content_cid in-browser,
+// byte-for-byte identical to provenance.py (CIDv1, raw codec 0x55, sha2-256, base32).
+(function(){
+  var f=document.getElementById('vfile'), out=document.getElementById('vout'), exp=document.getElementById('vexp');
+  if(!f) return;
+  var A="abcdefghijklmnopqrstuvwxyz234567";
+  function b32(bytes){var bits=0,val=0,s="";for(var i=0;i<bytes.length;i++){val=(val<<8)|bytes[i];bits+=8;
+    while(bits>=5){s+=A[(val>>>(bits-5))&31];bits-=5;}} if(bits>0){s+=A[(val<<(5-bits))&31];} return s;}
+  async function run(file){
+    out.innerHTML='Hashing '+file.name+'…';
+    var buf=await file.arrayBuffer();
+    var d=new Uint8Array(await crypto.subtle.digest('SHA-256',buf));
+    var hex="0x"; for(var i=0;i<d.length;i++) hex+=d[i].toString(16).padStart(2,"0");
+    var cidBytes=new Uint8Array(4+d.length); cidBytes.set([0x01,0x55,0x12,0x20]); cidBytes.set(d,4);
+    var cid="b"+b32(cidBytes);
+    var html='<div style="font-family:ui-monospace,monospace;font-size:13px;word-break:break-all;color:var(--ink)">'
+      +'<div><span style="color:var(--gold)">content_sha256</span> '+hex+'</div>'
+      +'<div style="margin-top:6px"><span style="color:var(--gold)">content_cid</span> '+cid+'</div>'
+      +'<div style="margin-top:6px;color:var(--muted)">'+buf.byteLength.toLocaleString()+' bytes · computed locally, nothing uploaded</div>';
+    var e=exp.value.trim().toLowerCase();
+    if(e){var ok=(e===hex.toLowerCase()||e===cid.toLowerCase());
+      html+='<div style="margin-top:10px;font-weight:700;color:'+(ok?'#7bd88f':'#e0705a')+'">'
+        +(ok?'✓ MATCH — this is the exact authored asset':'✗ no match — different bytes')+'</div>';}
+    out.innerHTML=html+'</div>';
+  }
+  f.addEventListener('change',function(ev){if(ev.target.files[0])run(ev.target.files[0]);});
+  exp.addEventListener('input',function(){if(f.files[0])run(f.files[0]);});
+})();
+</script>
 </body>
 </html>
