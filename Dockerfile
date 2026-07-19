@@ -8,7 +8,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg fonts-de
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY pipeline.py server.py ./
+# server.py imports x402/provenance/tokengate at load — copy all runtime modules
+# or the container crashes on startup with ModuleNotFoundError.
+COPY pipeline.py server.py x402.py provenance.py tokengate.py ./
 
 # Host sets PORT -> server.py runs the HTTP MCP transport on 0.0.0.0:$PORT.
 ENV PORT=8000
