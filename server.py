@@ -25,7 +25,7 @@ def _load_dotenv(path: str = ".env") -> None:
 
 
 _load_dotenv()
-import time, urllib.request
+import re, time, urllib.request
 import x402       # x402/X Layer paid-endpoint gate (opt-in via DALANG_X402_PAYTO)
 import provenance  # Web3 provenance: content fingerprint + CID + mint-ready NFT metadata
 import tokengate   # X Layer token-gating (opt-in via DALANG_TOKENGATE_CONTRACT)
@@ -46,6 +46,7 @@ def _upload_mp4(data: bytes, name: str) -> str | None:
     base = os.environ.get("DALANG_UPLOAD_ENDPOINT")
     if not base:
         return None
+    name = re.sub(r"[^A-Za-z0-9._-]", "_", name) or "animatic.mp4"  # LLM/caller title -> safe key
     url = base.rstrip("/") + "/" + name
     headers = {"Content-Type": "video/mp4"}
     if os.environ.get("DALANG_UPLOAD_AUTH"):
@@ -110,13 +111,13 @@ def generate_animatic(
     a content fingerprint (content_sha256) + IPFS content id (content_cid) for on-chain
     provenance, the shot list, and metadata. On failure returns {"error": ...}.
     """
-    if ACCESS_KEY and not hmac.compare_digest(access_key, ACCESS_KEY):  # constant-time
+    if ACCESS_KEY and not hmac.compare_digest(access_key.encode(), ACCESS_KEY.encode()):  # constant-time
         return {"error": "unauthorized: valid access_key required"}
     if tokengate.enabled():  # X Layer holders-only, if configured
         ok, reason = tokengate.check(wallet)
         if not ok:
             return {"error": f"token-gated: {reason}"}
-    brief = (brief or "").strip()
+    brief = (brief or "").strip()[:4000]  # cap: unbounded briefs = unbounded LLM token spend
     if not brief and not shot_list:  # one of the two must drive the render
         return {"error": "brief is required (or pass a shot_list)"}
     if aspect_ratio not in VALID_ASPECTS:
@@ -144,8 +145,12 @@ def generate_animatic(
         out["content_cid"] = provenance.content_cid(video)
         # Delivery: over the cap, offload to object storage if configured (beats the
         # serverless response cap); else embed inline (the only channel on a bare host).
-        uploaded = _upload_mp4(video, f"{result['title'][:40] or 'animatic'}-{uuid.uuid4().hex[:8]}.mp4".replace(" ", "_")) \
-            if size > MAX_INLINE_BYTES else None
+        uploaded = None
+        if size > MAX_INLINE_BYTES:
+            try:  # a storage blip must not discard a good, expensive render -> fall back inline
+                uploaded = _upload_mp4(video, f"{result['title'][:40] or 'animatic'}-{uuid.uuid4().hex[:8]}.mp4")
+            except Exception:
+                uploaded = None
         if uploaded:
             out["animatic_url"] = uploaded
         else:
@@ -153,7 +158,9 @@ def generate_animatic(
             if size > MAX_INLINE_BYTES:
                 out["warning"] = (f"animatic {size} bytes exceeds inline cap ({MAX_INLINE_BYTES}) and no "
                                   "DALANG_UPLOAD_ENDPOINT is set; this response may exceed a serverless body limit")
-        media_url = out.get("animatic_url") or f"ipfs://{out['content_cid']}"  # mint placeholder, not the doubled data URI
+        # animation_url for minting: a resolvable URL or the self-contained data URI —
+        # never ipfs://<content_cid> (that CID is a fingerprint, won't resolve once chunk-pinned).
+        media_url = out.get("animatic_url") or out.get("animatic_data_uri", "")
         # Proof-of-creation: a tamper-evident manifest; anchor manifest_digest on X Layer.
         manifest = provenance.provenance_manifest(out["title"], out["content_sha256"], out["content_cid"],
                                                   int(time.time()), "cinematic" if cinematic else "Ken Burns")
@@ -194,20 +201,21 @@ def storyboard(
     Returns the shot list, a hero poster (data URI), an SRT preview, and metadata.
     On failure returns {"error": ...} instead of raising.
     """
-    if ACCESS_KEY and not hmac.compare_digest(access_key, ACCESS_KEY):
+    if ACCESS_KEY and not hmac.compare_digest(access_key.encode(), ACCESS_KEY.encode()):
         return {"error": "unauthorized: valid access_key required"}
     if tokengate.enabled():
         ok, reason = tokengate.check(wallet)
         if not ok:
             return {"error": f"token-gated: {reason}"}
-    if not (brief or "").strip():
+    brief = (brief or "").strip()[:4000]  # cap LLM token spend on the free preview tier
+    if not brief:
         return {"error": "brief is required"}
     if aspect_ratio not in VALID_ASPECTS:
         return {"error": f"aspect_ratio must be one of {list(VALID_ASPECTS)}"}
     workdir = os.path.join(WORKROOT, uuid.uuid4().hex[:12])
     try:
         target_seconds = max(8, min(90, int(target_seconds)))
-        sb = _storyboard(brief.strip(), style, aspect_ratio, target_seconds, workdir, language, template)
+        sb = _storyboard(brief, style, aspect_ratio, target_seconds, workdir, language, template)
         with open(sb["hero"], "rb") as f:
             poster = "data:image/png;base64," + base64.b64encode(f.read()).decode()
         return {"title": sb["title"], "subject": sb["subject"], "shots": sb["shots"],

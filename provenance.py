@@ -42,10 +42,11 @@ def erc721_metadata(title: str, description: str, image: str, animation_url: str
             "settlement": "x402 · X Layer (USDT/USDG)",
         },
     }
-    if royalty_bps and royalty_recipient:  # EIP-2981 / OpenSea royalties on secondary sales
-        m["seller_fee_basis_points"] = int(royalty_bps)
-        m["fee_recipient"] = royalty_recipient
-        m["properties"]["royalty"] = {"bps": int(royalty_bps), "recipient": royalty_recipient, "standard": "EIP-2981"}
+    if royalty_bps and royalty_recipient:  # OpenSea off-chain royalty hints (NOT on-chain
+        m["seller_fee_basis_points"] = int(royalty_bps)  # EIP-2981 — that needs royaltyInfo()
+        m["fee_recipient"] = royalty_recipient           # on an ERC-721 the caller deploys).
+        m["properties"]["royalty"] = {"bps": int(royalty_bps), "recipient": royalty_recipient,
+                                      "standard": "opensea-metadata (off-chain)"}
     return m
 
 def provenance_manifest(title: str, sha256: str, cid: str, created_at: int,
@@ -85,7 +86,7 @@ def demo() -> None:
     assert "seller_fee_basis_points" not in m  # no royalty unless configured
     r = erc721_metadata("T", "d", "i", "a", {"S": "x"}, "0xAA", "bafkreiX", 500, "0xRoyal")
     assert r["seller_fee_basis_points"] == 500 and r["fee_recipient"] == "0xRoyal"
-    assert r["properties"]["royalty"]["standard"] == "EIP-2981"
+    assert r["properties"]["royalty"]["standard"].startswith("opensea")
     man = provenance_manifest("T", content_sha256(b"x"), content_cid(b"x"), 1_700_000_000, "Ken Burns")
     d1, d2 = manifest_digest(man), manifest_digest(dict(reversed(list(man.items()))))
     assert d1.startswith("0x") and d1 == d2  # digest is canonical (key order independent)

@@ -21,7 +21,9 @@ def check(name, cond):
 async def _downstream(scope, receive, send):
     m = await receive()  # must receive the replayed body
     await send({"type": "http.response.start", "status": 200, "headers": [(b"content-type", b"application/json")]})
-    await send({"type": "http.response.body", "body": b'{"ok":true,"bodylen":%d}' % len(m.get("body", b""))})
+    # a real success carries content_sha256 (the settle sentinel); echo bodylen too
+    await send({"type": "http.response.body",
+                "body": b'{"content_sha256":"0xabc","ok":true,"bodylen":%d}' % len(m.get("body", b""))})
 
 def call(body_obj, headers=None, path="/mcp", method="POST"):
     mw = x402.X402Middleware(_downstream)
@@ -79,21 +81,28 @@ def main():
     check("settle called once on success", len(settled_calls) == 1)
     check("X-PAYMENT-RESPONSE header carries settlement proof", "0xdeadbeef" in base64.b64decode(r["headers"].get("x-payment-response", "")).decode())
 
-    # downstream that returns an {"error": ...} -> served, but NOT settled (no charge on failure)
-    async def _err_downstream(scope, receive, send):
-        await receive()
-        await send({"type": "http.response.start", "status": 200, "headers": []})
-        await send({"type": "http.response.body", "body": b'{"error":"render failed"}'})
-    settled_calls.clear()
-    mw = x402.X402Middleware(_err_downstream)
-    scope = {"type": "http", "method": "POST", "path": "/mcp", "scheme": "https",
-             "headers": [(b"host", b"d"), (b"x-payment", xp.encode())]}
-    async def rcv(): return {"type": "http.request", "body": json.dumps(paid).encode(), "more_body": False}
-    got = {}
-    async def snd(m):
-        if m["type"] == "http.response.start": got["status"] = m["status"]
-    asyncio.new_event_loop().run_until_complete(mw(scope, rcv, snd))
-    check("render error served (200), NOT settled -> no charge on failure", got["status"] == 200 and len(settled_calls) == 0)
+    def _drive(downstream_body):
+        async def dn(scope, receive, send):
+            await receive()
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": downstream_body})
+        settled_calls.clear()
+        mw = x402.X402Middleware(dn)
+        scope = {"type": "http", "method": "POST", "path": "/mcp", "scheme": "https",
+                 "headers": [(b"host", b"d"), (b"x-payment", xp.encode())]}
+        async def rcv(): return {"type": "http.request", "body": json.dumps(paid).encode(), "more_body": False}
+        got = {}
+        async def snd(m):
+            if m["type"] == "http.response.start": got["status"] = m["status"]
+        asyncio.new_event_loop().run_until_complete(mw(scope, rcv, snd))
+        return got, len(settled_calls)
+
+    # render error (no content_sha256) -> served, NOT settled (no charge on failure)
+    got, n = _drive(b'{"error":"render failed"}')
+    check("render error served (200), NOT settled -> no charge on failure", got["status"] == 200 and n == 0)
+    # BYPASS ATTEMPT: a successful render whose voiceover is literally "error" -> MUST settle
+    got, n = _drive(b'{"content_sha256":"0xok","shots":[{"voiceover":"error"}]}')
+    check("caller-controlled 'error' text can't dodge settlement", got["status"] == 200 and n == 1)
 
     print("\n" + ("test_x402: ALL PASSED" if not FAILS else f"test_x402 FAILURES: {FAILS}"))
     return 1 if FAILS else 0

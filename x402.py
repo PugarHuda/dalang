@@ -20,11 +20,19 @@ def _cfg() -> dict:
     return {
         "payTo": os.environ.get("DALANG_X402_PAYTO", ""),
         "asset": os.environ.get("DALANG_X402_ASSET", ""),          # USDT/USDG contract on X Layer
+        # network: the facilitator's literal. OKX A2MCP's exact string is unverified from
+        # here (okx.com is unreachable); X Layer CAIP-2 is "eip155:196". Override to match.
         "network": os.environ.get("DALANG_X402_NETWORK", "x-layer"),
         "amount": os.environ.get("DALANG_X402_AMOUNT", "490000"),  # atomic units ($0.49 USDT, 6dp)
         "facilitator": os.environ.get("DALANG_X402_FACILITATOR", ""),
         "description": os.environ.get("DALANG_X402_DESCRIPTION", "One DALANG animatic"),
-        "timeout": int(os.environ.get("DALANG_X402_TIMEOUT", "300")),
+        # timeout must exceed the worst-case render (cinematic ~240s + assembly) or a slow
+        # render finishes AFTER the authorization expires -> settle fails on a good render.
+        "timeout": int(os.environ.get("DALANG_X402_TIMEOUT", "600")),
+        # the "exact" (EIP-3009) scheme needs the asset's EIP-712 domain in `extra` so the
+        # client can build a matching transferWithAuthorization signature (USDC: version "2").
+        "asset_name": os.environ.get("DALANG_X402_ASSET_NAME", ""),
+        "asset_version": os.environ.get("DALANG_X402_ASSET_VERSION", "1"),
     }
 
 def enabled() -> bool:
@@ -33,11 +41,12 @@ def enabled() -> bool:
 def payment_requirements(resource: str) -> dict:
     """The x402 v1 402 body: what the caller must pay and where (X Layer)."""
     c = _cfg()
+    extra = {"name": c["asset_name"], "version": c["asset_version"]} if c["asset_name"] else {}
     return {"x402Version": 1, "error": "X-PAYMENT header is required", "accepts": [{
         "scheme": "exact", "network": c["network"], "maxAmountRequired": c["amount"],
         "asset": c["asset"], "payTo": c["payTo"], "resource": resource,
         "description": c["description"], "mimeType": "application/json",
-        "maxTimeoutSeconds": c["timeout"], "extra": {}}]}
+        "maxTimeoutSeconds": c["timeout"], "extra": extra}]}
 
 def verify(x_payment_b64: str, resource: str) -> tuple[bool, str]:
     """Verify an X-PAYMENT header via the configured facilitator's /verify (x402).
@@ -112,10 +121,17 @@ class X402Middleware:
         if scope.get("type") != "http" or scope.get("method") != "POST" or scope.get("path") != MCP_PATH:
             return await self.app(scope, receive, send)
         # buffer the JSON-RPC body so we can both inspect it and replay it downstream
-        chunks, more = [], True
+        chunks, total, more = [], 0, True
         while more:
             m = await receive()
-            chunks.append(m.get("body", b""))
+            b = m.get("body", b"")
+            total += len(b)
+            if total > 6_000_000:  # MCP JSON-RPC is small; cap so a huge POST can't exhaust memory
+                await send({"type": "http.response.start", "status": 413,
+                            "headers": [(b"content-type", b"application/json")]})
+                await send({"type": "http.response.body", "body": b'{"error":"request body too large"}'})
+                return
+            chunks.append(b)
             more = m.get("more_body", False)
         body = b"".join(chunks)
 
@@ -157,10 +173,12 @@ class X402Middleware:
             buffered.append(msg)
         await self.app(scope, make_replay(), capture)
 
-        # Success = 2xx AND the tool didn't return an {"error": ...} (guards + render
-        # failures come back as HTTP 200 error dicts on MCP, so status alone isn't enough).
+        # Success = 2xx AND the response carries a server-only success sentinel. A render
+        # always emits content_sha256; an {"error": ...} dict never does. We must NOT sniff
+        # for the absence of "error" — that string is caller-controllable (a voiceover/title
+        # of "error"), which would let a caller dodge settlement and replay for free renders.
         resp_body = b"".join(m.get("body", b"") for m in buffered if m["type"] == "http.response.body")
-        if 200 <= status < 300 and b'"error"' not in resp_body:
+        if 200 <= status < 300 and b"content_sha256" in resp_body:
             settled, sresult = await asyncio.to_thread(settle, xp, resource)  # capture on X Layer
             if settled:  # attach on-chain proof (tx hash) so the caller can verify payment
                 xpr = base64.b64encode(json.dumps(sresult).encode())
