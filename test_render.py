@@ -7,7 +7,7 @@ tool's guards and response shape.
 
     python test_render.py     # exits non-zero on any failure; SKIPs if no ffmpeg
 """
-import json, os, shutil, subprocess, sys, tempfile
+import base64, json, os, shutil, subprocess, sys, tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pipeline, server
@@ -141,7 +141,9 @@ def main():
     server.ACCESS_KEY, server.KEEP_FILES = None, False
     out = server.generate_animatic(brief="a cozy cafe", style="anime", aspect_ratio="9:16", target_seconds=20)
     check("animatic_data_uri", out.get("animatic_data_uri", "").startswith("data:video/mp4;base64,"))
-    check("poster_data_uri", out.get("poster_data_uri", "").startswith("data:image/png;base64,"))
+    check("poster_data_uri (jpeg thumbnail)", out.get("poster_data_uri", "").startswith("data:image/jpeg;base64,"))
+    check("content_sha256 matches the DELIVERED bytes", out["content_sha256"] ==
+          __import__("provenance").content_sha256(base64.b64decode(out["animatic_data_uri"].split(",", 1)[1])))
     check("srt with cues", "-->" in out.get("srt", ""))
     check("title + 3 shots", bool(out.get("title")) and len(out.get("shots", [])) == 3)
     check("workdir cleaned (no paths leaked)", "animatic" not in out)

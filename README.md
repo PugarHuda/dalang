@@ -55,6 +55,12 @@ card; `music="auto"` (or `warm`/`tense`/`upbeat`/`noir`) scores it with a ducked
 (bundled beds in `assets/music/`, override via `DALANG_MUSIC_DIR`). Together they turn a
 silent tech demo into something that reads as a film — the biggest muted-autoplay lever.
 
+> **Burned-in text needs a `drawtext`-enabled ffmpeg.** The Docker container (real ffmpeg
+> + fonts) and local runs burn captions + title/end-card text into the video. The **Vercel
+> serverless** build has no `drawtext`, so there text is skipped — the cards render without
+> text and captions fall back to the `srt` soft-subs. Run the container for full-fidelity
+> burned text; music, Ken Burns, cinematic motion, and provenance work on both.
+
 **Agent composability:** pass a ready-made `shot_list` (the same JSON the tool returns)
 to render it directly and skip the LLM — so an upstream "director" agent can own the
 storyboard and call DALANG purely as the render primitive.

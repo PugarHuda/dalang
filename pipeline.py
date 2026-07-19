@@ -384,10 +384,11 @@ def _has_drawtext() -> bool:
     return _has_drawtext._c
 
 def _font_file() -> str | None:
-    """A TTF for drawtext captions/cards. The repo bundles DejaVuSans-Bold so it works
-    everywhere — including serverless (Vercel) which has NO system fonts, where without
-    this the flagship bookend text + captions would silently vanish. Override with
-    DALANG_FONT; falls back to system DejaVu/Arial. None -> text skips gracefully."""
+    """A TTF for drawtext captions/cards. The repo bundles DejaVuSans-Bold so a font is
+    always present for hosts that HAVE drawtext but no system font (bare local runs). NOTE:
+    the Vercel serverless ffmpeg has no drawtext at all (see _has_drawtext), so text is
+    gated off there regardless of this font. Override with DALANG_FONT; falls back to system
+    DejaVu/Arial. None -> text skips gracefully."""
     bundled = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "fonts", "DejaVuSans-Bold.ttf")
     cands = [os.environ.get("DALANG_FONT"), bundled,
              "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
@@ -544,6 +545,20 @@ def mix_music(video: str, bed: str, out: str) -> None:
           "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac",
           "-movflags", "+faststart", out])
 
+# ---------- serverless delivery helpers (keep the inline response under the body cap) ----------
+
+def thumbnail(png_in: str, out_jpg: str, width: int = 480) -> None:
+    """A small JPEG poster from a frame. A full hero PNG is ~2 MB (~3 MB base64) and alone
+    blows a serverless response cap; this is ~60 KB, so the poster stops eating the budget."""
+    _run([FFMPEG, "-y", "-i", png_in, "-vf", f"scale={width}:-2", "-q:v", "5", out_jpg])
+
+def shrink_video(video_in: str, out: str, height: int = 1280, crf: int = 30) -> None:
+    """Re-encode smaller (downscale + higher crf) so a render can still be delivered inline
+    on a host with no object storage, instead of shipping a body the platform rejects."""
+    _run([FFMPEG, "-y", "-i", video_in, "-vf", f"scale=-2:{height}", "-c:v", "libx264",
+          "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", str(crf),
+          "-c:a", "aac", "-ar", "44100", "-ac", "2", "-movflags", "+faststart", out])
+
 def storyboard(brief: str, style: str, aspect: str, target_seconds: int, workdir: str,
                language: str = "", template: str = "") -> dict:
     """Cheap preview tier (~1 LLM + 1 image call, no video): the shot list + a single
@@ -640,6 +655,8 @@ def render(brief: str, style: str, aspect: str, target_seconds: int, voiceover: 
     # voiceovers (independent, parallel)
     with ThreadPoolExecutor(max_workers=6) as ex:
         auds = list(ex.map(do_tts, shots))
+
+    _has_drawtext()  # warm the cache once now so the concurrent do_clip calls below don't race to probe
 
     def do_clip(args):
         s, img, aud = args

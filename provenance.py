@@ -23,14 +23,29 @@ def content_cid(data: bytes) -> str:
     cid = b"\x01\x55" + mh                              # CIDv1, raw codec
     return "b" + base64.b32encode(cid).decode("ascii").lower().rstrip("=")
 
+def _int(v) -> int:
+    """Best-effort int from caller input ('5%', '250', 250, None) — 0 on anything odd, so a
+    malformed royalty can't crash a completed paid render."""
+    try:
+        return int(float(str(v).strip().rstrip("%")))
+    except (TypeError, ValueError):
+        return 0
+
 def _norm_splits(royalties, royalty_bps: int, royalty_recipient: str) -> list[dict]:
     """Normalize royalty inputs into a clean [{recipient, bps}] split list. `royalties`
     (a co-creator split — every agent that helped make the video) wins; else fall back to
-    the single legacy royalty_bps/recipient. Drops empty/zero entries."""
-    splits = list(royalties) if royalties else (
+    the single legacy royalty_bps/recipient. Tolerates caller junk (non-dict entries, '5%'
+    strings, missing keys) — a bad royalty must never discard an expensive render."""
+    splits = list(royalties) if isinstance(royalties, list) else (
         [{"recipient": royalty_recipient, "bps": royalty_bps}] if royalty_recipient and royalty_bps else [])
-    return [{"recipient": str(s["recipient"]), "bps": int(s["bps"])}
-            for s in splits if s.get("recipient") and int(s.get("bps") or 0) > 0]
+    out = []
+    for s in splits:
+        if not isinstance(s, dict):
+            continue
+        r, bps = str(s.get("recipient") or "").strip(), _int(s.get("bps"))
+        if r and bps > 0:
+            out.append({"recipient": r, "bps": bps})
+    return out
 
 def erc721_metadata(title: str, description: str, image: str, animation_url: str,
                     attributes: dict, sha256: str, cid: str,

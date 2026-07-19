@@ -51,6 +51,15 @@ writable (WORKROOT is set there); the **cinematic tier** polls Venice for minute
 exceed the duration limit, so prefer it on a container or keep shot counts low on Vercel.
 The default **Ken Burns** tier renders comfortably within 300s.
 
+Two serverless limits to know:
+- **No `drawtext`.** The `imageio-ffmpeg` static build has no drawtext filter, so burned-in
+  captions and title/end-card TEXT are skipped on Vercel (the cards render without text;
+  captions fall back to the `srt` soft-subs). Run the **container** for full burned text.
+- **~4.5 MB response cap.** The video is returned inline as a data URI. DALANG shrinks the
+  poster to a thumbnail and, with no object storage, downscales the video to fit — but for
+  full-quality/long/cinematic renders set **`DALANG_UPLOAD_ENDPOINT`** (e.g. Vercel Blob /
+  S3 / R2) so the mp4 is offloaded and a URL is returned instead of an inline blob.
+
 ## Smoke test after deploy
 A raw `curl` won't work — MCP streamable HTTP needs the `initialize` handshake and a
 session. Use a FastMCP client (`pip install fastmcp`):
@@ -63,7 +72,7 @@ async def main():
         print("tools:", [t.name for t in await c.list_tools()])
 asyncio.run(main())
 PY
-# expect: tools: ['generate_animatic']
+# expect: tools: ['generate_animatic', 'storyboard', 'quote']
 ```
 
 ## Register on OKX.AI

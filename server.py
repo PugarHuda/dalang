@@ -29,7 +29,8 @@ import re, time, urllib.request
 import x402       # x402/X Layer paid-endpoint gate (opt-in via DALANG_X402_PAYTO)
 import provenance  # Web3 provenance: content fingerprint + CID + mint-ready NFT metadata
 import tokengate   # X Layer token-gating (opt-in via DALANG_TOKENGATE_CONTRACT)
-from pipeline import render, storyboard as _storyboard  # imported after .env load
+from pipeline import (render, storyboard as _storyboard,  # imported after .env load
+                      thumbnail as _thumbnail, shrink_video as _shrink_video)
 
 # A remote A2MCP caller can't read the host FS, so the video is delivered inline as a
 # base64 data URI inside the JSON response. Vercel caps a function response at ~4.5 MB,
@@ -95,7 +96,9 @@ def generate_animatic(
         target_seconds: rough total length (8-90); shot count scales with it up to a cap.
         voiceover: narrate each shot with text-to-speech.
         consistent: keep one recurring subject across shots (hero frame + edits).
-        captions: burn the spoken line into each shot (readable on muted autoplay).
+        captions: burn the spoken line into each shot (readable on muted autoplay). Needs a
+            drawtext-enabled ffmpeg — present on the Docker/local host, ABSENT on the Vercel
+            serverless build, where captions fall back to the SRT soft-subs in the response.
         voice: TTS voice override (empty -> server default); e.g. a Kokoro voice id.
         language: write the title/voiceover in this language (e.g. "Bahasa Indonesia").
             Non-Latin scripts (CJK/Arabic) need a matching caption font via DALANG_FONT.
@@ -141,37 +144,51 @@ def generate_animatic(
                         consistent, captions, voice, language, template, shot_list,
                         motion_engine="video" if cinematic else "kenburns",
                         bookends=bookends, music=music)
-        size = os.path.getsize(result["animatic"])
         with open(result["animatic"], "rb") as f:
             video = f.read()
         plan = json.load(open(result["shot_list"], encoding="utf-8"))
         out = {"title": result["title"], "duration_seconds": result["duration_seconds"],
-               "animatic_bytes": size, "subject": plan.get("subject", ""), "shots": plan.get("shots", []),
-               "srt": result.get("srt", "")}  # editable soft-subs alongside the burned-in captions
-        if result.get("frames"):  # hero frame as a poster/thumbnail for sharing (og:image)
-            with open(result["frames"][0], "rb") as pf:
-                out["poster_data_uri"] = "data:image/png;base64," + base64.b64encode(pf.read()).decode()
-        # Web3 provenance: a fingerprint + content id anyone can verify (see note on
-        # content_cid — it's the exact-bytes CIDv1, a fingerprint, not a pinned DAG root).
-        out["content_sha256"] = provenance.content_sha256(video)
-        out["content_cid"] = provenance.content_cid(video)
-        # Delivery: weigh the WHOLE inline payload (base64 video ~4/3 + the poster PNG +
-        # srt all ride in the JSON body) against the serverless response cap — gating on the
-        # raw video alone under-counts and a passing video + poster can still blow the limit.
-        inline_est = (size + 2) // 3 * 4 + len(out.get("poster_data_uri", "")) + len(out.get("srt", "")) + 2000
-        too_big = inline_est > MAX_RESPONSE_BYTES
-        uploaded = None
-        if too_big:  # over the cap: offload to object storage if configured
-            try:  # a storage blip must not discard a good, expensive render -> fall back inline
+               "subject": plan.get("subject", ""), "shots": plan.get("shots", []),
+               "srt": result.get("srt", "")}  # editable soft-subs (the caption channel where drawtext is absent)
+        if result.get("frames"):  # hero frame -> a SMALL jpeg poster; a full PNG (~3MB b64) alone blows the cap
+            try:
+                thumb = os.path.join(workdir, "poster.jpg")
+                _thumbnail(result["frames"][0], thumb)
+                with open(thumb, "rb") as pf:
+                    out["poster_data_uri"] = "data:image/jpeg;base64," + base64.b64encode(pf.read()).decode()
+            except Exception:  # thumbnailing failed -> fall back to the raw frame
+                with open(result["frames"][0], "rb") as pf:
+                    out["poster_data_uri"] = "data:image/png;base64," + base64.b64encode(pf.read()).decode()
+        # Delivery: pick the channel + the EXACT bytes the caller receives, then compute
+        # provenance on those bytes so the returned fingerprint always matches what's delivered.
+        def inline_len(vb):  # whole JSON body: base64 video (~4/3) + poster + srt + slack
+            return (len(vb) + 2) // 3 * 4 + len(out.get("poster_data_uri", "")) + len(out.get("srt", "")) + 2000
+        uploaded, deliver = None, video
+        if inline_len(video) > MAX_RESPONSE_BYTES:  # too big to inline safely
+            try:  # prefer object storage (serves the full-quality original)
                 uploaded = _upload_mp4(video, f"{result['title'][:40] or 'animatic'}-{uuid.uuid4().hex[:8]}.mp4")
             except Exception:
                 uploaded = None
+            if not uploaded:  # no storage -> shrink to fit rather than ship a body the platform rejects
+                try:
+                    small = os.path.join(workdir, "small.mp4")
+                    _shrink_video(result["animatic"], small)
+                    sb = open(small, "rb").read()
+                    if len(sb) < len(video):
+                        deliver = sb
+                        out["downscaled"] = "re-encoded smaller to fit the inline response limit; set DALANG_UPLOAD_ENDPOINT for full quality"
+                except Exception:
+                    pass
+        prov_bytes = video if uploaded else deliver  # fingerprint the bytes the caller actually gets
+        out["animatic_bytes"] = len(prov_bytes)
+        out["content_sha256"] = provenance.content_sha256(prov_bytes)
+        out["content_cid"] = provenance.content_cid(prov_bytes)
         if uploaded:
             out["animatic_url"] = uploaded
         else:
-            out["animatic_data_uri"] = "data:video/mp4;base64," + base64.b64encode(video).decode()
-            if too_big:
-                out["warning"] = (f"inline response ~{inline_est} bytes may exceed the serverless body "
+            out["animatic_data_uri"] = "data:video/mp4;base64," + base64.b64encode(deliver).decode()
+            if inline_len(deliver) > MAX_RESPONSE_BYTES:
+                out["warning"] = (f"inline response ~{inline_len(deliver)} bytes exceeds the serverless body "
                                   f"limit (~{MAX_RESPONSE_BYTES}); set DALANG_UPLOAD_ENDPOINT to offload the mp4")
         # animation_url for minting: a resolvable URL or the self-contained data URI —
         # never ipfs://<content_cid> (that CID is a fingerprint, won't resolve once chunk-pinned).
@@ -214,7 +231,10 @@ def quote(target_seconds: int = 30, cinematic: bool = False) -> dict:
     Returns the shot count, engine, and the USD price the caller pays (x402 · X Layer).
     """
     from pipeline import shot_budget, MAX_VIDEO_SHOTS, MAX_SHOTS
-    t = max(8, min(90, int(target_seconds)))
+    try:
+        t = max(8, min(90, int(target_seconds)))
+    except (TypeError, ValueError):
+        return {"error": "target_seconds must be a number (8-90)"}
     n_shots = min(MAX_SHOTS, shot_budget(t)[0])
     # price_usd is the amount x402 ACTUALLY charges — a flat DALANG_X402_AMOUNT for any paid
     # call (the middleware doesn't vary by engine), so we must quote that, not a made-up number.
