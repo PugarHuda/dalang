@@ -724,7 +724,7 @@ def demo() -> None:
     os.environ["DALANG_NO_DRAWTEXT"] = "1"  # simulate a build without drawtext (Vercel static ffmpeg)
     assert _caption_filter("hi", 1080, 1920, "unused.txt") == ""  # -> skip text, don't fail the render
     del os.environ["DALANG_NO_DRAWTEXT"]
-    if _font_file():  # where a font exists, a caption compiles to a drawtext with safe escaping
+    if _font_file() and _has_drawtext():  # font + a drawtext build -> a safe-escaped drawtext filter
         cf = _caption_filter("Colons: and 'quotes' are fine.", 1080, 1920,
                              os.path.join(tempfile.gettempdir(), "dalang_capcheck.txt"))
         assert cf.startswith(",drawtext=textfile=") and "fontfile=" in cf, cf
