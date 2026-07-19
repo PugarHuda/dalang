@@ -368,6 +368,21 @@ def _placeholder_frame(out: str, w: int, h: int) -> None:
     """A solid dark frame so one failed shot can't sink a whole paid render."""
     _run([FFMPEG, "-y", "-f", "lavfi", "-i", f"color=c=0x1a1206:s={w}x{h}:d=1", "-frames:v", "1", out])
 
+def _has_drawtext() -> bool:
+    """Whether this ffmpeg build has the drawtext filter (needs libfreetype). The pip
+    imageio-ffmpeg static build used on serverless (Vercel) does NOT — so attempting
+    drawtext there fails the whole render. Gate every text overlay on this; where it's
+    absent, captions/card text skip gracefully and the SRT soft-subs still ship."""
+    if os.environ.get("DALANG_NO_DRAWTEXT"):  # test/ops override
+        return False
+    if not hasattr(_has_drawtext, "_c"):
+        try:
+            out = subprocess.run([FFMPEG, "-hide_banner", "-filters"], capture_output=True, text=True).stdout
+            _has_drawtext._c = " drawtext " in out
+        except Exception:
+            _has_drawtext._c = False
+    return _has_drawtext._c
+
 def _font_file() -> str | None:
     """A TTF for drawtext captions/cards. The repo bundles DejaVuSans-Bold so it works
     everywhere — including serverless (Vercel) which has NO system fonts, where without
@@ -388,7 +403,7 @@ def _caption_filter(text: str, w: int, h: int, capfile: str) -> str:
     ponytail: fontsize/position are ratios of h; tune if a language runs long."""
     text = " ".join((text or "").split())
     font = _font_file()
-    if not text or not font:
+    if not text or not font or not _has_drawtext():  # no drawtext (e.g. Vercel static ffmpeg) -> skip
         return ""
     lines = textwrap.wrap(text, width=max(16, int(w / (h * 0.026))))[:3]  # cap 3 lines
     with open(capfile, "w", encoding="utf-8") as f:
@@ -474,7 +489,7 @@ def build_bookend(title: str, subtitle: str, sec: float, w: int, h: int, out: st
     Text is best-effort: no font on the host -> a clean colored card, never a failure."""
     font = _font_file()
     draws = ""
-    if font and title:
+    if font and title and _has_drawtext():  # no drawtext build (Vercel static) -> a clean textless card
         tf = out + ".t.txt"
         with open(tf, "w", encoding="utf-8") as f:
             f.write("\n".join(textwrap.wrap(title, 20)[:3]))
@@ -706,6 +721,9 @@ def demo() -> None:
     assert build_srt({"shots": [{"voiceover": "hi", "seconds": 2}]}, offset=1.6).startswith(
         "1\n00:00:01,600 -->")                          # title card shifts every cue
     assert _caption_filter("", 1080, 1920, "unused.txt") == ""  # no text -> no drawtext, no write
+    os.environ["DALANG_NO_DRAWTEXT"] = "1"  # simulate a build without drawtext (Vercel static ffmpeg)
+    assert _caption_filter("hi", 1080, 1920, "unused.txt") == ""  # -> skip text, don't fail the render
+    del os.environ["DALANG_NO_DRAWTEXT"]
     if _font_file():  # where a font exists, a caption compiles to a drawtext with safe escaping
         cf = _caption_filter("Colons: and 'quotes' are fine.", 1080, 1920,
                              os.path.join(tempfile.gettempdir(), "dalang_capcheck.txt"))
