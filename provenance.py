@@ -73,7 +73,7 @@ def erc721_metadata(title: str, description: str, image: str, animation_url: str
     }
     splits = _norm_splits(royalties, royalty_bps, royalty_recipient)
     if splits:
-        total = sum(s["bps"] for s in splits)
+        total = min(10000, sum(s["bps"] for s in splits))  # cap at 100% — a >10000 sum is a caller footgun
         m["seller_fee_basis_points"] = total          # OpenSea single field: the total royalty
         m["fee_recipient"] = splits[0]["recipient"]   # OpenSea single payee: first co-creator
         m["properties"]["royalty"] = {"total_bps": total, "splits": splits,
@@ -129,6 +129,11 @@ def demo() -> None:
         {"recipient": "0xDalang", "bps": 500}, {"recipient": "0xEmpty", "bps": 0}])  # zero dropped
     assert sp["seller_fee_basis_points"] == 1000 and sp["fee_recipient"] == "0xTrend"
     assert len(sp["properties"]["royalty"]["splits"]) == 3  # the zero-bps entry is dropped
+    cap = erc721_metadata("T", "d", "i", "a", {}, "0x", "bafkrei", royalties=[  # sum >100% -> capped
+        {"recipient": "0xA", "bps": 9000}, {"recipient": "0xB", "bps": 8000}])
+    assert cap["seller_fee_basis_points"] == 10000  # not 17000
+    assert erc721_metadata("T", "d", "i", "a", {}, "0x", "bafkrei",  # junk royalties never crash
+                           royalties=["x", {}, {"recipient": "0xC", "bps": "3.5%"}])["seller_fee_basis_points"] == 3
     man = provenance_manifest("T", content_sha256(b"x"), content_cid(b"x"), 1_700_000_000, "Ken Burns")
     assert "parent_cid" not in man  # no lineage unless it's a remix
     d1, d2 = manifest_digest(man), manifest_digest(dict(reversed(list(man.items()))))

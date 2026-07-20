@@ -57,6 +57,8 @@ def verify(x_payment_b64: str, resource: str) -> tuple[bool, str]:
         payload = json.loads(base64.b64decode(x_payment_b64))
     except Exception:
         return False, "malformed X-PAYMENT header"
+    if not isinstance(payload, dict):  # valid base64 of a non-object (array/primitive) -> reject cleanly
+        return False, "malformed X-PAYMENT header"
     if payload.get("x402Version") != 1 or payload.get("scheme") != "exact":
         return False, "unsupported payment scheme"
     fac = _cfg()["facilitator"]
@@ -102,6 +104,8 @@ def is_paid_call(body: bytes) -> bool:
         msg = json.loads(body)
     except Exception:
         return False
+    if not isinstance(msg, dict):  # JSON-RPC batches are arrays; primitives/null are legal JSON too
+        return False               # -> not a single paid tools/call, and .get() below would crash
     return (msg.get("method") == "tools/call"
             and isinstance(msg.get("params"), dict)
             and msg["params"].get("name") == PAID_TOOL)

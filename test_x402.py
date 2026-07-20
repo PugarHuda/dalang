@@ -53,6 +53,12 @@ def main():
     print("\n== is_paid_call detection ==")
     paid = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "generate_animatic", "arguments": {}}}
     check("paid tools/call detected", x402.is_paid_call(json.dumps(paid).encode()))
+    # non-object JSON bodies (JSON-RPC batch arrays, primitives, null) must not crash the gate
+    for bad in (b"[]", b'[{"method":"tools/call","params":{"name":"generate_animatic"}}]', b"123", b"null", b'"x"'):
+        try:
+            check(f"non-object body {bad[:12]!r} -> not paid, no crash", x402.is_paid_call(bad) is False)
+        except Exception as e:
+            check(f"non-object body {bad[:12]!r} -> not paid, no crash", False, repr(e))
     check("initialize not paid", not x402.is_paid_call(b'{"method":"initialize"}'))
     check("tools/list not paid", not x402.is_paid_call(b'{"method":"tools/list"}'))
 
