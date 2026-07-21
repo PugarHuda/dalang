@@ -11,7 +11,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # server.py imports x402/provenance/tokengate at load — copy all runtime modules
 # or the container crashes on startup with ModuleNotFoundError.
 COPY pipeline.py server.py x402.py provenance.py tokengate.py ./
-COPY assets/ ./assets/   # bundled music beds for the Score + Sting tier
+# bundled music beds + font for the Score + Sting tier (Docker COPY has no inline comments —
+# a trailing '# ...' would be parsed as extra source args and break the build)
+COPY assets/ ./assets/
 
 # Host sets PORT -> server.py runs the HTTP MCP transport on 0.0.0.0:$PORT.
 ENV PORT=8000

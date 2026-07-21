@@ -3,5 +3,8 @@ fastmcp==3.4.4
 # so this ships a static build that _resolve_ffmpeg() falls back to. Harmless on a
 # container (system ffmpeg on PATH wins).
 imageio-ffmpeg
+# uvicorn: server.py's container __main__ runs the x402-wrapped ASGI app on it. FastMCP
+# pulls it transitively today, but the paid container path imports it directly, so pin it.
+uvicorn
 # LLM + image + TTS all go through Venice (OpenAI-compatible) via stdlib urllib —
 # no extra client libs needed.
