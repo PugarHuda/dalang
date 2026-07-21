@@ -24,3 +24,15 @@ jobs:
         run: python test_x402.py
       - name: Integration test (real ffmpeg, stubbed Venice — no API key)
         run: python test_render.py
+
+  docker:
+    # The container is a recommended deploy path but was never built in CI, so two
+    # Dockerfile breaks (missing modules, an inline COPY comment) shipped unnoticed.
+    # Build it here so a broken Dockerfile fails CI instead of the deploy.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker build (catches Dockerfile breakage)
+        run: docker build -t dalang:ci .
+      - name: container boots + imports all runtime modules
+        run: docker run --rm dalang:ci python -c "import server; print('container ok')"
