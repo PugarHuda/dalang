@@ -137,6 +137,26 @@ def main():
     shutil.rmtree(d, ignore_errors=True)
     pipeline.edit_image = fake_edit
 
+    # regression: Venice can 200 with a decodable-but-INVALID frame (writes garbage, no raise).
+    # ffmpeg -loop 1 on it would hang forever without the _run timeout + do_clip placeholder
+    # fallback. Low timeout keeps this fast even if a build hits the bound.
+    import time as _t
+    def garbage_gen(p, o, w, h, subject="", seed=None):
+        open(o, "wb").write(b"\x89PNG\r\n\x1a\n" + b"truncated junk" * 3)  # PNG magic + non-image bytes
+    _saved_gen, _saved_to = pipeline.gen_image, pipeline.FFMPEG_TIMEOUT
+    pipeline.gen_image, pipeline.FFMPEG_TIMEOUT = garbage_gen, 5
+    _t0 = _t.time()
+    res, d = render_tmp(consistent=False, captions=True)
+    elapsed = _t.time() - _t0
+    check("corrupt frames -> render survives (no hang) via placeholder + timeout",
+          os.path.exists(res["animatic"]) and os.path.getsize(res["animatic"]) > 1000 and elapsed < 60,
+          f"{elapsed:.1f}s")
+    check("corrupt-frame video still decodes cleanly",
+          subprocess.run(["ffmpeg", "-v", "error", "-i", res["animatic"], "-f", "null", "-"],
+                         capture_output=True).returncode == 0)
+    shutil.rmtree(d, ignore_errors=True)
+    pipeline.gen_image, pipeline.FFMPEG_TIMEOUT = _saved_gen, _saved_to
+
     print("\n== server boundary: response shape ==")
     server.ACCESS_KEY, server.KEEP_FILES = None, False
     out = server.generate_animatic(brief="a cozy cafe", style="anime", aspect_ratio="9:16", target_seconds=20)
