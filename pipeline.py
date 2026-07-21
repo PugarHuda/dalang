@@ -6,7 +6,7 @@ non-trivial logic and are exercised by demo() below. The impure steps
 a calibration knob, not clever code. One Venice key powers all three stages.
 """
 from __future__ import annotations
-import base64, hashlib, json, os, subprocess, tempfile, textwrap, time, urllib.error, urllib.request
+import base64, hashlib, json, os, subprocess, tempfile, textwrap, time, urllib.error, urllib.parse, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 # ---------- pure logic (tested by demo()) ----------
@@ -170,6 +170,20 @@ VID_SECS = float(VIDEO_DURATION.rstrip("s"))
 MAX_VIDEO_SHOTS = int(os.environ.get("DALANG_MAX_VIDEO_SHOTS", 6))  # cost guard
 
 _RETRYABLE = {408, 409, 429, 500, 502, 503, 504}
+
+def _download_auth(url: str) -> dict:
+    """Headers for fetching a video download_url. Attach the Venice bearer token ONLY when the
+    URL is on a Venice host — a completed job's download_url is often a SIGNED CDN/S3 URL on a
+    third-party domain, and sending the API key there would leak it. Also reject non-http(s)
+    schemes so a malicious/compromised response can't make us fetch file:// / gopher:// (SSRF)."""
+    p = urllib.parse.urlparse(url)
+    if p.scheme not in ("http", "https"):
+        raise RuntimeError(f"video download_url has an unsupported scheme: {p.scheme!r}")
+    vhost = urllib.parse.urlparse(VENICE_BASE).hostname or ""
+    host = (p.hostname or "").lower()
+    if host == vhost.lower() or host.endswith(".venice.ai"):
+        return {"Authorization": f"Bearer {os.environ.get('VENICE_API_KEY', '')}"}
+    return {}  # signed CDN URL -> no token (it doesn't need one, and we must not leak it)
 
 def _venice(path: str, body: dict, raw: bool = False, tries: int = 3):
     """POST to Venice with retry/backoff on transient errors and clean errors
@@ -347,7 +361,7 @@ def gen_video(frame_path: str, image_prompt: str, motion: str, out_path: str,
             url = body.get("download_url")
             if not url:
                 raise RuntimeError("video COMPLETED without a download_url")
-            req = urllib.request.Request(url, headers={"Authorization": f"Bearer {os.environ['VENICE_API_KEY']}"})
+            req = urllib.request.Request(url, headers=_download_auth(url))  # token only if it's a Venice host
             with urllib.request.urlopen(req, timeout=180) as r, open(out_path, "wb") as f:
                 f.write(r.read())
             return
@@ -747,6 +761,14 @@ def demo() -> None:
     assert _norm_motion("Pan-Right") == "pan_right"
     assert _norm_motion("dolly") == "static"
     assert _norm_motion(123) == "static" and _norm_motion(None) == "static"  # non-str motion -> no crash
+    assert "Authorization" in _download_auth("https://api.venice.ai/video/x")  # Venice host -> token sent
+    assert _download_auth("https://d1234.cloudfront.net/v.mp4?sig=abc") == {}   # signed CDN -> NO token leak
+    assert _download_auth("https://evil.example.com/v.mp4") == {}               # third party -> NO token leak
+    for bad in ("file:///etc/passwd", "gopher://x", "ftp://x/y"):
+        try:
+            _download_auth(bad); assert False
+        except RuntimeError:
+            pass  # non-http(s) scheme rejected (no SSRF via a malicious response)
     assert validate_plan({"shots": [{"image_prompt": "a", "motion": 123}]})["shots"][0]["motion"] == "static"
     assert shot_budget(20) == (5, 4)  # demo-scale request
     n90, per90 = shot_budget(90)      # long request stays within the cost cap
