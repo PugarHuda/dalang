@@ -28,7 +28,7 @@ def _int(v) -> int:
     malformed royalty can't crash a completed paid render."""
     try:
         return int(float(str(v).strip().rstrip("%")))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):  # OverflowError: int(float("1e400"))/inf
         return 0
 
 def _norm_splits(royalties, royalty_bps: int, royalty_recipient: str) -> list[dict]:
@@ -132,6 +132,7 @@ def demo() -> None:
     cap = erc721_metadata("T", "d", "i", "a", {}, "0x", "bafkrei", royalties=[  # sum >100% -> capped
         {"recipient": "0xA", "bps": 9000}, {"recipient": "0xB", "bps": 8000}])
     assert cap["seller_fee_basis_points"] == 10000  # not 17000
+    assert _int("1e400") == 0 and _int(float("inf")) == 0  # OverflowError -> 0, not a crash
     assert erc721_metadata("T", "d", "i", "a", {}, "0x", "bafkrei",  # junk royalties never crash
                            royalties=["x", {}, {"recipient": "0xC", "bps": "3.5%"}])["seller_fee_basis_points"] == 3
     man = provenance_manifest("T", content_sha256(b"x"), content_cid(b"x"), 1_700_000_000, "Ken Burns")

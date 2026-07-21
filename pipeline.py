@@ -51,7 +51,7 @@ def apply_template(brief: str, template: str) -> str:
 def _norm_motion(m: str) -> str:
     """Map a model's free-text motion to a valid token (default static).
     Fixes gap: models return e.g. 'slow zoom in' -> was silently dropped."""
-    m = (m or "").lower().strip().replace(" ", "_").replace("-", "_")
+    m = str(m or "").lower().strip().replace(" ", "_").replace("-", "_")  # str(): motion may be a non-string
     if m in MOTIONS:
         return m
     if "zoom" in m and "in" in m:
@@ -103,6 +103,8 @@ def validate_plan(plan: dict) -> dict:
     gate for BOTH the LLM breakdown and a caller's shot_list, so it SELF-HEALS instead of
     raising — a missing/odd field on one shot must never sink a paid render. The only hard
     failure is no shots at all (nothing to render)."""
+    if not isinstance(plan, dict):  # the LLM may return a top-level array/primitive, not an object
+        raise ValueError(f"plan must be a JSON object, got {type(plan).__name__}")
     shots = plan.get("shots")
     if not isinstance(shots, list) or not shots:
         raise ValueError("plan has no shots")
@@ -181,7 +183,15 @@ def _venice(path: str, body: dict, raw: bool = False, tries: int = 3):
         try:
             with urllib.request.urlopen(req, timeout=180) as r:
                 data = r.read()
-            return data if raw else json.loads(data)
+            if raw:
+                return data
+            parsed = json.loads(data)
+            # Venice can answer 200 with a top-level {"error": ...} (rate limit / moderation);
+            # surface it as the real message instead of a confusing downstream KeyError.
+            if isinstance(parsed, dict) and parsed.get("error"):
+                err = parsed["error"]
+                raise RuntimeError(f"Venice {path}: {err.get('message', err) if isinstance(err, dict) else err}")
+            return parsed
         except urllib.error.HTTPError as e:
             last = e
             if e.code in _RETRYABLE and attempt < tries - 1:
@@ -243,8 +253,14 @@ def breakdown(brief: str, style: str, target_seconds: int, language: str = "") -
         "messages": [{"role": "system", "content": sys}, {"role": "user", "content": brief}],
         "max_tokens": 6000, "temperature": 0.7,
     })
-    text = _strip_fence(r["choices"][0]["message"]["content"])
-    return validate_plan(json.loads(text, strict=False))  # tolerate raw newlines in strings
+    try:  # a malformed 200 (choices=[]/missing/content=null) -> a clean error, not a raw KeyError
+        content = r["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        raise RuntimeError(f"Venice chat returned an unexpected shape: {str(r)[:200]}")
+    try:
+        return validate_plan(json.loads(_strip_fence(content), strict=False))  # tolerate raw newlines
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"Venice chat content was not valid JSON: {e}")
 
 def gen_image(prompt: str, out_path: str, w: int, h: int,
               subject: str = "", seed: int | None = None) -> None:
@@ -358,8 +374,16 @@ def _resolve_ffmpeg() -> str:
 
 FFMPEG = _resolve_ffmpeg()
 
+FFMPEG_TIMEOUT = int(os.environ.get("DALANG_FFMPEG_TIMEOUT", 180))  # bound every ffmpeg call
+
 def _run(cmd: list[str]) -> None:
-    r = subprocess.run(cmd, capture_output=True)
+    try:
+        # timeout is critical: `ffmpeg -loop 1` on a decodable-but-invalid frame (Venice can
+        # return a truncated/non-image body) HANGS forever, tying up the render worker. A bound
+        # turns that into a clean failure the caller can fall back from.
+        r = subprocess.run(cmd, capture_output=True, timeout=FFMPEG_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"ffmpeg timed out after {FFMPEG_TIMEOUT}s (likely a corrupt input)")
     if r.returncode != 0:  # surface ffmpeg's stderr tail — else the paid boundary returns a
         tail = r.stderr.decode("utf-8", "replace").strip().splitlines()[-4:]  # useless "Command [...]"
         raise RuntimeError(f"ffmpeg failed (exit {r.returncode}): {' | '.join(tail)}")
@@ -670,7 +694,12 @@ def render(brief: str, style: str, aspect: str, target_seconds: int, voiceover: 
                 return clip
             except Exception:
                 pass
-        build_clip(img, float(s["seconds"]), s["motion"], w, h, aud, clip, caption=cap)
+        try:
+            build_clip(img, float(s["seconds"]), s["motion"], w, h, aud, clip, caption=cap)
+        except Exception:  # a corrupt frame (ffmpeg fails/times out) must not sink the render ->
+            ph = os.path.join(workdir, f"ph_{s['scene']:02d}.png")  # fall back to a placeholder clip
+            _placeholder_frame(ph, w, h)
+            build_clip(ph, float(s["seconds"]), "static", w, h, aud, clip, caption=cap)
         return clip
 
     # video clips run on Venice's queue (I/O-bound), so a wider pool is fine there
@@ -717,6 +746,8 @@ def demo() -> None:
     assert _norm_motion("slow zoom in") == "zoom_in"
     assert _norm_motion("Pan-Right") == "pan_right"
     assert _norm_motion("dolly") == "static"
+    assert _norm_motion(123) == "static" and _norm_motion(None) == "static"  # non-str motion -> no crash
+    assert validate_plan({"shots": [{"image_prompt": "a", "motion": 123}]})["shots"][0]["motion"] == "static"
     assert shot_budget(20) == (5, 4)  # demo-scale request
     n90, per90 = shot_budget(90)      # long request stays within the cost cap
     assert n90 == MAX_SHOTS and 2 <= per90 <= 6
@@ -773,6 +804,11 @@ def demo() -> None:
         validate_plan({"shots": []}); assert False  # no shots is the one hard failure
     except ValueError:
         pass
+    for notdict in ([1, 2, 3], "oops", 5, None):  # LLM top-level array/primitive -> clean ValueError, not AttributeError
+        try:
+            validate_plan(notdict); assert False
+        except ValueError:
+            pass
     print("dalang pipeline self-check ok")
 
 if __name__ == "__main__":
