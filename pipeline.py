@@ -6,7 +6,7 @@ non-trivial logic and are exercised by demo() below. The impure steps
 a calibration knob, not clever code. One Venice key powers all three stages.
 """
 from __future__ import annotations
-import base64, hashlib, json, os, subprocess, tempfile, textwrap, time, urllib.error, urllib.parse, urllib.request
+import base64, hashlib, ipaddress, json, os, subprocess, tempfile, textwrap, time, urllib.error, urllib.parse, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 # ---------- pure logic (tested by demo()) ----------
@@ -108,9 +108,10 @@ def validate_plan(plan: dict) -> dict:
     shots = plan.get("shots")
     if not isinstance(shots, list) or not shots:
         raise ValueError("plan has no shots")
-    # coerce non-dict elements to {} (they self-heal below) so a malformed shot_list like
-    # {"shots": ["a", 2]} can't AttributeError and sink a paid render; then cost-cap the list.
-    shots = [s if isinstance(s, dict) else {} for s in shots][:MAX_SHOTS]
+    # slice to the cost cap BEFORE materializing (a multi-million-element shots array must not
+    # allocate first), then coerce non-dict elements to {} so a malformed shot_list like
+    # {"shots": ["a", 2]} can't AttributeError and sink a paid render.
+    shots = [s if isinstance(s, dict) else {} for s in shots[:MAX_SHOTS]]
     title = str(plan.get("title") or "Untitled animatic")
     subject = str(plan.get("subject") or "")
     for i, s in enumerate(shots):
@@ -179,8 +180,14 @@ def _download_auth(url: str) -> dict:
     p = urllib.parse.urlparse(url)
     if p.scheme not in ("http", "https"):
         raise RuntimeError(f"video download_url has an unsupported scheme: {p.scheme!r}")
-    vhost = urllib.parse.urlparse(VENICE_BASE).hostname or ""
     host = (p.hostname or "").lower()
+    try:  # block a literal private/loopback/link-local IP (e.g. the 169.254.169.254 metadata SSRF)
+        ip = ipaddress.ip_address(host)
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+            raise RuntimeError(f"video download_url points at a non-public address: {host}")
+    except ValueError:
+        pass  # a hostname, not an IP literal -> allowed (public Venice / CDN)
+    vhost = urllib.parse.urlparse(VENICE_BASE).hostname or ""
     if host == vhost.lower() or host.endswith(".venice.ai"):
         return {"Authorization": f"Bearer {os.environ.get('VENICE_API_KEY', '')}"}
     return {}  # signed CDN URL -> no token (it doesn't need one, and we must not leak it)
@@ -554,14 +561,13 @@ _STYLE_MOOD = {"cinematic": "warm", "anime": "upbeat", "noir": "noir", "watercol
 
 def resolve_bed(music: str, style: str) -> str | None:
     """Map a `music` request to a bed file (or None=off). ''/'none'/'off' -> off;
-    an existing file path -> that track; 'auto' -> a mood from the style preset; a mood
-    name (warm/tense/upbeat/noir) -> DALANG_MUSIC_DIR/<mood>.mp3 then the bundled bed."""
-    m = (music or "").strip()
-    if not m or m.lower() in ("none", "off"):
+    'auto' -> a mood from the style preset; a mood name (warm/tense/upbeat/noir) ->
+    DALANG_MUSIC_DIR/<mood>.mp3 then the bundled bed. `music` is CALLER-controlled, so it
+    is NEVER treated as a filesystem path — only the fixed mood keywords resolve, and only
+    inside the operator's trusted dirs (else a caller could probe/mux arbitrary host files)."""
+    ml = (music or "").strip().lower()
+    if not ml or ml in ("none", "off"):
         return None
-    if os.path.exists(m):
-        return m
-    ml = m.lower()
     if ml == "auto":
         ml = _STYLE_MOOD.get((style or "").strip().lower(), "warm")
     if ml not in MUSIC_MOODS:
@@ -787,6 +793,12 @@ def demo() -> None:
     assert _srt_time(3661.5) == "01:01:01,500"
     assert resolve_bed("", "cinematic") is None and resolve_bed("none", "anime") is None  # off
     assert resolve_bed("zzz", "cinematic") is None      # unknown mood -> off (not a crash)
+    assert resolve_bed("/etc/passwd", "cinematic") is None and resolve_bed("C:/Windows/win.ini", "x") is None  # NOT a FS path
+    for bad in ("http://169.254.169.254/latest/meta-data/", "http://10.0.0.1/x", "http://127.0.0.1/x"):
+        try:
+            _download_auth(bad); assert False  # private/link-local/loopback IP -> SSRF-blocked
+        except RuntimeError:
+            pass
     assert _STYLE_MOOD["noir"] == "noir" and _STYLE_MOOD["anime"] == "upbeat"  # auto maps style->mood
     assert build_srt({"shots": [{"voiceover": "hi", "seconds": 2}]}, offset=1.6).startswith(
         "1\n00:00:01,600 -->")                          # title card shifts every cue

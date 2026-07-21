@@ -110,6 +110,10 @@ def main():
     # BYPASS ATTEMPT: a successful render whose voiceover is literally "error" -> MUST settle
     got, n = _drive(b'{"content_sha256":"0xok","shots":[{"voiceover":"error"}]}')
     check("caller-controlled 'error' text can't dodge settlement", got["status"] == 200 and n == 1)
+    # CHARGE-ON-FAILURE: an error string that merely ECHOES the bare token (a brief in a Venice
+    # 4xx body) is NOT the quoted JSON key -> must NOT settle (no charge on a failed render)
+    got, n = _drive(b'{"error":"venice 400: your brief said content_sha256 haha"}')
+    check("bare-token echo in an error body does NOT settle", got["status"] == 200 and n == 0)
 
     # SETTLE FAILS on a good render -> artifact WITHHELD (402), not given away for free
     x402.settle = lambda hdr, res: (False, {"error": "insufficient balance"})

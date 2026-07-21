@@ -1,10 +1,17 @@
-"""Token-gating on X Layer — opt-in access control by on-chain balance (dep-free).
+"""Token-gating on X Layer — opt-in soft gate by on-chain balance (dep-free).
 
 Set DALANG_TOKENGATE_CONTRACT (an ERC-20 or ERC-721 on X Layer) to require callers to
 hold >= DALANG_TOKENGATE_MIN of it. The caller passes their `wallet`; the server reads
 balanceOf(wallet) over JSON-RPC (DALANG_RPC_URL) and allows or rejects. Read-only — no
 keys, no writes. Fail-closed: an RPC error denies (never grants access on a failed read).
 Off by default (unset → no gate).
+
+SECURITY — this checks the balance of a CLAIMED address; it does NOT prove the caller
+CONTROLS it. Anyone can pass a known holder's public address and pass the gate. So this is
+a SOFT gate/hint, not real access control on its own — pair it with x402 (whose X-PAYMENT
+requires a signature from the paying wallet, which IS proof of control) as the real paywall.
+A standalone hard gate would need a signed-nonce ownership challenge (ecrecover), not built
+here. Do NOT rely on token-gating alone to protect a paid or private endpoint.
 
 NOTE: DALANG_TOKENGATE_MIN is in RAW ON-CHAIN UNITS. For an ERC-721 it's an NFT count
 (MIN=1 = "holds any"). For an 18-decimal ERC-20, "1 whole token" is MIN=1000000000000000000,

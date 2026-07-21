@@ -118,7 +118,8 @@ def generate_animatic(
         royalties: co-creator split for the NFT, [{"recipient": "0x..", "bps": 250}, ...] —
             every agent that helped make the video co-owns it (OpenSea off-chain hints).
         wallet: caller's X Layer address — required only if the server sets
-            DALANG_TOKENGATE_CONTRACT (renders gated to holders of that token/NFT).
+            DALANG_TOKENGATE_CONTRACT (a SOFT gate on the balance of this claimed address;
+            it does not prove ownership, so pair it with x402 for real access control).
         access_key: required only if the server sets DALANG_ACCESS_KEY.
 
     Returns the animatic (base64 data URI), a poster frame, an SRT subtitle track,
@@ -127,7 +128,7 @@ def generate_animatic(
     """
     if ACCESS_KEY and not hmac.compare_digest(access_key.encode(), ACCESS_KEY.encode()):  # constant-time
         return {"error": "unauthorized: valid access_key required"}
-    if tokengate.enabled():  # X Layer holders-only, if configured
+    if tokengate.enabled():  # X Layer balance soft-gate, if configured (see tokengate.py security note)
         ok, reason = tokengate.check(wallet)
         if not ok:
             return {"error": f"token-gated: {reason}"}

@@ -22,7 +22,9 @@ DALANG_TOKENGATE_MIN=1
 DALANG_RPC_URL=https://rpc.xlayer.tech
 ```
 `balanceOf(wallet)` is read via RPC (see `tokengate.py`); decimals = 0 so `MIN=1` means
-"holds at least one credit".
+"holds at least one credit". Note: this checks the balance of a *claimed* address and does
+not prove the caller controls it — it's a **soft gate**, so pair it with x402 (whose signed
+X-PAYMENT is real proof of wallet control) rather than relying on it alone.
 
 **A. Pay-per-render in credits (x402 asset) — needs one more step.** The x402 "exact"
 scheme settles via **EIP-3009** (`transferWithAuthorization`), which a plain ERC-20 does

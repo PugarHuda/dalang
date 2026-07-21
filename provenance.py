@@ -36,7 +36,7 @@ def _norm_splits(royalties, royalty_bps: int, royalty_recipient: str) -> list[di
     (a co-creator split — every agent that helped make the video) wins; else fall back to
     the single legacy royalty_bps/recipient. Tolerates caller junk (non-dict entries, '5%'
     strings, missing keys) — a bad royalty must never discard an expensive render."""
-    splits = list(royalties) if isinstance(royalties, list) else (
+    splits = list(royalties)[:64] if isinstance(royalties, list) else (  # cap length: DoS guard
         [{"recipient": royalty_recipient, "bps": royalty_bps}] if royalty_recipient and royalty_bps else [])
     out = []
     for s in splits:

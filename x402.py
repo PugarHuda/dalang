@@ -182,7 +182,10 @@ class X402Middleware:
         # for the absence of "error" — that string is caller-controllable (a voiceover/title
         # of "error"), which would let a caller dodge settlement and replay for free renders.
         resp_body = b"".join(m.get("body", b"") for m in buffered if m["type"] == "http.response.body")
-        rendered_ok = 200 <= status < 300 and b"content_sha256" in resp_body
+        # Match the QUOTED JSON key, not the bare token: an error message that merely echoes a
+        # caller's "content_sha256" text (e.g. a brief surfaced in a Venice 4xx body) must not be
+        # scored a success and settled. A real render emits "content_sha256":"0x…" as a key.
+        rendered_ok = 200 <= status < 300 and b'"content_sha256"' in resp_body
         if not rendered_ok:  # guard/render error -> serve it, never settle (no charge on failure)
             for m in buffered:
                 await send(m)
