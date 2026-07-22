@@ -1,6 +1,6 @@
 # DALANG — X post + 90s demo script for #OKXAI
 
-Endpoint: `https://dalang-engine.vercel.app/mcp` · Landing: https://dalang-hudas-projects-a8e7f558.vercel.app · Repo: github.com/PugarHuda/dalang · OKX Agent ID: #7234 (under review)
+Endpoint: `https://dalang-engine.vercel.app/mcp` · Landing: https://dalang-studio.vercel.app · Repo: github.com/PugarHuda/dalang · OKX Agent ID: #7234 (under review)
 Fill the ‹brackets› before posting. Attach the ≤90s video (no separate upload — it lives in the post).
 
 ---
