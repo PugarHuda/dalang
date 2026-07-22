@@ -128,6 +128,8 @@ def generate_animatic(
     """
     if ACCESS_KEY and not hmac.compare_digest(access_key.encode(), ACCESS_KEY.encode()):  # constant-time
         return {"error": "unauthorized: valid access_key required"}
+    if cinematic and not os.environ.get("DALANG_ENABLE_CINEMATIC"):  # the ~$0.55/shot tier is a credit
+        return {"error": "cinematic tier is disabled on this endpoint"}  # sink on a free/public endpoint
     if tokengate.enabled():  # X Layer balance soft-gate, if configured (see tokengate.py security note)
         ok, reason = tokengate.check(wallet)
         if not ok:

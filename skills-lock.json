@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "skills": {
+    "okx-agent-payments-protocol": {
+      "source": "okx/onchainos-skills",
+      "sourceType": "github",
+      "skillPath": "skills/okx-agent-payments-protocol/SKILL.md",
+      "computedHash": "f6457ff33236038df4c4c9fc739c245b8dfe4b47010cdbd9232363294a3e0dc0"
+    },
+    "okx-agentic-wallet": {
+      "source": "okx/onchainos-skills",
+      "sourceType": "github",
+      "skillPath": "skills/okx-agentic-wallet/SKILL.md",
+      "computedHash": "b8e75679dfcbc7c0de371402e9052eeef02736c4fdb5aeff3c7583ba0550d9cc"
+    },
+    "okx-ai": {
+      "source": "okx/onchainos-skills",
+      "sourceType": "github",
+      "skillPath": "skills/okx-ai/SKILL.md",
+      "computedHash": "f181c065ab079d1a0d9efd79b08c6989264e2066cbed64c3ac21812e8c465cc1"
+    },
+    "okx-dapp-discovery": {
+      "source": "okx/onchainos-skills",
+      "sourceType": "github",
+      "skillPath": "skills/okx-dapp-discovery/SKILL.md",
+      "computedHash": "3747ac84d96065e41d9043e5d3ceff9330ca8a221a013ee740b0d03e43cb952c"
+    },
+    "okx-defi": {
+      "source": "okx/onchainos-skills",
+      "sourceType": "github",
+      "skillPath": "skills/okx-defi/SKILL.md",
+      "computedHash": "65caa804915982acf59489509a8e6003829a50efbb21ac81bffbbfbaa6f6953b"
+    },
+    "okx-dex-market": {
+      "source": "okx/onchainos-skills",
+      "sourceType": "github",
+      "skillPath": "skills/okx-dex-market/SKILL.md",
+      "computedHash": "c722cc410d19042012a9841aaf783204f6c43000688934964e76e6f09cc7d6fc"
+    },
+    "okx-growth-competition": {
+      "source": "okx/onchainos-skills",
+      "sourceType": "github",
+      "skillPath": "skills/okx-growth-competition/SKILL.md",
+      "computedHash": "3507b92d7c9bf0dafe9836ed29863bf5c36d7bca165e225f68a9aeedd73f23b2"
+    },
+    "okx-guide": {
+      "source": "okx/onchainos-skills",
+      "sourceType": "github",
+      "skillPath": "skills/okx-guide/SKILL.md",
+      "computedHash": "4d31ccf22280d2de224aa921abf1f42380ef9617706414d0c033f615a40bc9f9"
+    }
+  }
+}
