@@ -1,0 +1,21 @@
+# Fly.io worker: keep the DALANG OKX agent (#7234) "online" 24/7.
+# A worker (no HTTP service) that sleeps between heartbeats -> minimal cost.
+app = "dalang-keeponline"
+primary_region = "sin"   # Singapore (near Indonesia / X Layer)
+
+[build]
+  dockerfile = "Dockerfile"
+
+# persist the wallet session + onchainos config across restarts
+[mounts]
+  source = "onchainos_data"
+  destination = "/root/.onchainos"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+
+# no [http_service] -> this is a background worker.
+# keep exactly one machine always running (don't autostop a heartbeat worker):
+[experimental]
+  auto_rollback = true
