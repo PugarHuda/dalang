@@ -11,3 +11,7 @@ build/
 *.abi
 
 .vercel
+
+# OKX Onchain OS tooling (installed via npx skills add — local only)
+.agents/
+skills-lock.json
