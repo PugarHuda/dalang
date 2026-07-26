@@ -288,8 +288,17 @@ def storyboard(
     try:
         target_seconds = max(8, min(90, int(target_seconds)))
         sb = _storyboard(brief, style, aspect_ratio, target_seconds, workdir, language, template)
-        with open(sb["hero"], "rb") as f:
-            poster = "data:image/png;base64," + base64.b64encode(f.read()).decode()
+        # Same cap as the paid path: a full-size hero PNG is ~3-5 MB base64 on its own and
+        # rides right at Vercel's ~4.5 MB response limit (a live call measured 5.2 MB), so this
+        # FREE preview — the first thing a caller tries — could 500 on a heavier frame.
+        try:
+            thumb = os.path.join(workdir, "hero.jpg")
+            _thumbnail(sb["hero"], thumb)
+            with open(thumb, "rb") as f:
+                poster = "data:image/jpeg;base64," + base64.b64encode(f.read()).decode()
+        except Exception:  # thumbnailing failed -> the raw frame is still better than nothing
+            with open(sb["hero"], "rb") as f:
+                poster = "data:image/png;base64," + base64.b64encode(f.read()).decode()
         return {"title": sb["title"], "subject": sb["subject"], "shots": sb["shots"],
                 "srt": sb["srt"], "hero_data_uri": poster,
                 "next": "call generate_animatic with the same brief (or this shot_list) to render the full video"}
