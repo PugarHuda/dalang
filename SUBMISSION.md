@@ -22,25 +22,24 @@ tx: 0xa4147829e1b727ecee9a29a9badf512518bfda13473ca9be26d2b02dfe7d8dfc · EVM wa
 
 ### ASP Description *
 ```
-DALANG turns a single line of brief into a finished, narrated vertical animatic — the whole
-storyboard-to-video pipeline as ONE agent call. Give it an idea; it writes the shot list,
+DALANG turns a single line of brief into a finished, narrated vertical animatic video — the
+whole storyboard-to-video pipeline as ONE agent call. Give it an idea; it writes the shot list,
 generates consistent frames (one recurring character/product held across every shot), voices
-each line, burns in captions, and assembles a share-ready 1080×1920 MP4. Two engines: a cheap
-Ken Burns tier (stills + motion, ~$0.05–0.12) and a PREMIUM cinematic tier that animates each
-shot into real motion via image-to-video.
+each line, burns in captions, and assembles a share-ready 1080×1920 MP4. Two engines: a fast
+Ken Burns tier and a cinematic tier that animates each shot into real motion via image-to-video.
 
-Built agent-native for OKX.AI: one tool = one billable call, priced and settled as x402 on
-X Layer (USDT). It's composable — an upstream "director" agent can hand DALANG a ready-made
-shot_list and use it purely as the render primitive — and every output is Web3-native: a
-content fingerprint (SHA-256 + IPFS CIDv1) and a tamper-evident proof-of-creation you can
-anchor on X Layer, plus mint-ready ERC-721 metadata with co-creator royalty splits (every
-agent that helped make a video co-owns it) and on-chain remix lineage. Multilingual
-title/voiceover, vertical templates (product ad, book trailer, recipe reel, real-estate,
-explainer), style presets, editable SRT, and a FREE storyboard-preview tier so a caller can
-approve the direction before paying. One sentence in → a paid, provably-authored, co-owned
-film out, with no human in the loop.
+It's a real on-chain business, agent-native for OKX.AI: pay-per-call — $0.49 in USDT0 on X Layer,
+settled on-chain via x402 (real, not illustrative). A FREE storyboard-preview and quote tier let
+a caller (or agent) approve direction and price before paying. It's composable: an upstream
+"director" agent can hand DALANG a ready-made shot_list and use it purely as the render
+primitive. And every output is Web3-native — a content fingerprint (SHA-256 + IPFS CIDv1) and a
+tamper-evident proof-of-creation you can anchor on X Layer, plus mint-ready ERC-721 metadata with
+co-creator royalty splits (every agent that helped make a video co-owns it) and on-chain remix
+lineage. Multilingual title/voiceover, vertical templates (product ad, book trailer, recipe reel,
+real-estate, explainer), style presets, and editable SRT subtitles.
 
-Live MCP endpoint: https://dalang-engine.vercel.app/mcp
+One sentence in → a paid, provably-authored, co-owned film out, with no human in the loop.
+Live on OKX.AI as Agent #7234 · MCP endpoint https://dalang-engine.vercel.app/mcp
 ```
 
 ### ASP Type *
@@ -51,12 +50,12 @@ A2MCP
 
 ### X Account Handle *
 ```
-<< your @handle >>
+@BangDropID
 ```
 
 ### X Participation Post (Link) *
 ```
-<< paste after you post the ≤90s demo with #OKXAI (Step 3) — draft in demo-x-post.md >>
+https://x.com/BangDropID/status/2079799873612755351
 ```
 
 ### Telegram Handle *
