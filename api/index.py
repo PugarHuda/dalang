@@ -35,6 +35,9 @@ except Exception as e:
 
 # stateless_http: every request is self-contained, which is what a serverless function
 # needs (no in-memory MCP session carried across invocations / instances).
-app = server.mcp.http_app(stateless_http=True)
+# json_response: REQUIRED on Vercel. With the default SSE transport the ASGI bridge kills
+# the stream before it flushes ("ASGI callable returned without completing response" in the
+# function log) and callers get HTTP 200 with an EMPTY body on every tool call.
+app = server.mcp.http_app(stateless_http=True, json_response=True)
 if server.x402.enabled():  # native x402 paid endpoint on X Layer, if configured
     app.add_middleware(server.x402.X402Middleware)
