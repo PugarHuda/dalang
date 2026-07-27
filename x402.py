@@ -61,7 +61,7 @@ def challenge_header(resource: str) -> bytes:
 
 def payment_requirements(resource: str) -> dict:
     """The x402 v1 402 body: what the caller must pay and where (X Layer)."""
-    return challenge(resource) | {"error": "X-PAYMENT header is required"}
+    return challenge(resource) | {"error": "payment required: send PAYMENT-SIG (or X-PAYMENT)"}
 
 def verify(x_payment_b64: str, resource: str) -> tuple[bool, str]:
     """Verify an X-PAYMENT header via the configured facilitator's /verify (x402).
@@ -168,7 +168,10 @@ class X402Middleware:
             return await self.app(scope, make_replay(), send)
 
         resource = f"{scope.get('scheme','https')}://{_header(scope, b'host') or 'localhost'}{MCP_PATH}"
-        xp = _header(scope, b"x-payment")
+        # OKX's own SDK sends the signed payment as PAYMENT-SIG; the coinbase/x402 spec calls
+        # it X-PAYMENT. Reading only the latter meant an OKX-native caller could pay and still
+        # be answered 402 forever — accept either.
+        xp = _header(scope, b"payment-sig") or _header(scope, b"x-payment")
 
         async def reject(reason):  # emit the x402 402 challenge, no compute run
             out = json.dumps(payment_requirements(resource) | {"error": reason}).encode()
@@ -221,5 +224,8 @@ class X402Middleware:
         xpr = base64.b64encode(json.dumps(sresult).encode())  # on-chain proof (tx hash)
         for m in buffered:
             if m["type"] == "http.response.start":
-                m["headers"] = list(m.get("headers", [])) + [(b"x-payment-response", xpr)]
+                # PAYMENT-RESPONSE is what OKX's SDK reads; x-payment-response is the
+                # coinbase/x402 spelling. Emit both so either client sees the proof.
+                m["headers"] = list(m.get("headers", [])) + [(b"payment-response", xpr),
+                                                            (b"x-payment-response", xpr)]
             await send(m)  # flush the paid render to the caller

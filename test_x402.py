@@ -101,6 +101,15 @@ def main():
     check("paid + success -> 200", r["status"] == 200)
     check("settle called once on success", len(settled_calls) == 1)
     check("X-PAYMENT-RESPONSE header carries settlement proof", "0xdeadbeef" in base64.b64decode(r["headers"].get("x-payment-response", "")).decode())
+    check("PAYMENT-RESPONSE (OKX spelling) carries the same proof",
+          "0xdeadbeef" in base64.b64decode(r["headers"].get("payment-response", "")).decode())
+    # OKX's SDK sends PAYMENT-SIG, not X-PAYMENT. Honouring only X-PAYMENT meant a caller who
+    # HAD paid was answered 402 — which is what got the sibling listing rejected for
+    # "results don't match the described capability".
+    settled_calls.clear()
+    r = call(paid, {"payment-sig": xp})
+    check("payment sent as PAYMENT-SIG is honoured -> 200", r["status"] == 200)
+    check("PAYMENT-SIG path settles once", len(settled_calls) == 1)
 
     def _drive(downstream_body):
         async def dn(scope, receive, send):
