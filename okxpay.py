@@ -89,6 +89,20 @@ def _sdk_client():
         return None  # SDK absent -> fall back to the raw facilitator call
 
 
+def _scrub(text) -> str:
+    """Strip our OKX credentials out of anything that travels back to a caller.
+
+    Facilitator/SDK errors are surfaced verbatim in the 402 body, and an exception that
+    happens to echo a request header would hand the API key to whoever triggered it.
+    """
+    out = str(text)
+    for v in (os.environ.get("OKX_API_KEY"), os.environ.get("OKX_SECRET_KEY"),
+              os.environ.get("OKX_PASSPHRASE"), os.environ.get("DALANG_ACCESS_KEY")):
+        if v and len(v) >= 6:
+            out = out.replace(v, "***")
+    return out
+
+
 def _sdk_models(payload: dict, resource: str):
     """Coerce either payload dialect into the SDK's models: OKX's client sends `accepted`
     and an object `resource`, a plain coinbase/x402 client sends neither."""
@@ -129,7 +143,7 @@ def verify(x_payment_b64: str, resource: str) -> tuple[bool, str]:
             res = client.verify(*_sdk_models(payload, resource))
             return bool(getattr(res, "is_valid", False)), getattr(res, "invalid_reason", "") or ""
         except Exception as e:
-            return False, f"facilitator error: {e}"
+            return False, f"facilitator error: {_scrub(e)}"
 
     fac = _cfg()["facilitator"]
     if not fac:
@@ -143,7 +157,7 @@ def verify(x_payment_b64: str, resource: str) -> tuple[bool, str]:
             res = json.loads(r.read())
         return bool(res.get("isValid")), res.get("invalidReason", "")
     except Exception as e:  # a facilitator outage must not silently grant free compute
-        return False, f"facilitator error: {e}"
+        return False, f"facilitator error: {_scrub(e)}"
 
 def settle(x_payment_b64: str, resource: str) -> tuple[bool, dict]:
     """Capture a verified payment via the facilitator's /settle (x402). Returns
@@ -162,7 +176,7 @@ def settle(x_payment_b64: str, resource: str) -> tuple[bool, dict]:
             out = res.model_dump(by_alias=True) if hasattr(res, "model_dump") else {"success": ok}
             return ok, out
         except Exception as e:
-            return False, {"error": f"settlement failed: {e}"}
+            return False, {"error": f"settlement failed: {_scrub(e)}"}
 
     fac = _cfg()["facilitator"]
     if not fac:
@@ -176,7 +190,7 @@ def settle(x_payment_b64: str, resource: str) -> tuple[bool, dict]:
             res = json.loads(r.read())
         return bool(res.get("success")), res
     except Exception as e:
-        return False, {"error": f"settlement failed: {e}"}
+        return False, {"error": f"settlement failed: {_scrub(e)}"}
 
 def is_paid_call(body: bytes) -> bool:
     """True only for a JSON-RPC tools/call of the paid tool — the handshake,
