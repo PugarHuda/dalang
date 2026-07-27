@@ -26,7 +26,10 @@ def _load_dotenv(path: str = ".env") -> None:
 
 _load_dotenv()
 import re, time, urllib.request
-import x402       # x402/X Layer paid-endpoint gate (opt-in via DALANG_X402_PAYTO)
+                 # our payment gate. The file is okxpay.py, NOT x402.py: OKX's official
+                 # seller SDK installs a package literally named `x402`, and a local module
+                 # with that name shadows it, so the SDK could never be imported.
+import okxpay as x402
 import provenance  # Web3 provenance: content fingerprint + CID + mint-ready NFT metadata
 import tokengate   # X Layer token-gating (opt-in via DALANG_TOKENGATE_CONTRACT)
 from pipeline import (render, storyboard as _storyboard,  # imported after .env load

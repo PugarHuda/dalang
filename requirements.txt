@@ -8,3 +8,4 @@ imageio-ffmpeg
 uvicorn
 # LLM + image + TTS all go through Venice (OpenAI-compatible) via stdlib urllib —
 # no extra client libs needed.
+okxweb3-app-x402   # official OKX seller SDK (used when OKX_API_KEY/SECRET/PASSPHRASE are set)

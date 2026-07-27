@@ -67,11 +67,46 @@ def payment_requirements(resource: str) -> dict:
     """The x402 v1 402 body: what the caller must pay and where (X Layer)."""
     return challenge(resource) | {"error": "payment required: send PAYMENT-SIG (or X-PAYMENT)"}
 
+def _sdk_client():
+    """OKX's official seller SDK client, or None when credentials aren't configured.
+
+    The plain /verify + /settle calls below answer 403 without OKX-signed auth — the
+    facilitator requires the API key, secret and passphrase from the OKX Developer Portal.
+    Set OKX_API_KEY / OKX_SECRET_KEY / OKX_PASSPHRASE and this path takes over
+    (`pip install okxweb3-app-x402`).
+    """
+    k = os.environ.get("OKX_API_KEY", "")
+    s = os.environ.get("OKX_SECRET_KEY", "")
+    p = os.environ.get("OKX_PASSPHRASE", "")
+    if not (k and s and p):
+        return None
+    try:
+        from x402.http.okx_facilitator_client import OKXFacilitatorClientSync, OKXFacilitatorConfig
+        from x402.http.okx_auth import OKXAuthConfig
+        return OKXFacilitatorClientSync(OKXFacilitatorConfig(
+            auth=OKXAuthConfig(api_key=k, secret_key=s, passphrase=p)))
+    except Exception:
+        return None  # SDK absent -> fall back to the raw facilitator call
+
+
+def _sdk_models(payload: dict, resource: str):
+    """Coerce either payload dialect into the SDK's models: OKX's client sends `accepted`
+    and an object `resource`, a plain coinbase/x402 client sends neither."""
+    from x402.schemas.payments import PaymentPayload, PaymentRequirements
+    accepts = payment_requirements(resource)["accepts"][0]
+    req = PaymentRequirements.model_validate(accepts)
+    p = dict(payload)
+    p.setdefault("accepted", accepts)
+    if isinstance(p.get("resource"), str):
+        p.pop("resource")
+    return PaymentPayload.model_validate(p), req
+
+
 def verify(x_payment_b64: str, resource: str) -> tuple[bool, str]:
-    """Verify an X-PAYMENT header via the configured facilitator's /verify (x402).
-    No facilitator -> reject: we never serve paid compute on an unverifiable claim."""
+    """Verify the payment header via OKX's facilitator (official SDK when credentials are
+    set). No facilitator -> reject: we never serve paid compute on an unverifiable claim."""
     if not x_payment_b64:
-        return False, "missing X-PAYMENT header"
+        return False, "missing payment: send PAYMENT-SIGNATURE (or X-PAYMENT)"
     try:
         payload = json.loads(base64.b64decode(x_payment_b64))
     except Exception:
@@ -85,6 +120,14 @@ def verify(x_payment_b64: str, resource: str) -> tuple[bool, str]:
     # v1 payloads arrive on X-PAYMENT, v2 on PAYMENT-SIGNATURE — accept both versions.
     if str(payload.get("x402Version")) not in ("1", "2") or scheme != "exact":
         return False, "unsupported payment scheme"
+    client = _sdk_client()
+    if client is not None:
+        try:
+            res = client.verify(*_sdk_models(payload, resource))
+            return bool(getattr(res, "is_valid", False)), getattr(res, "invalid_reason", "") or ""
+        except Exception as e:
+            return False, f"facilitator error: {e}"
+
     fac = _cfg()["facilitator"]
     if not fac:
         return False, "no facilitator configured"
@@ -103,13 +146,24 @@ def settle(x_payment_b64: str, resource: str) -> tuple[bool, dict]:
     """Capture a verified payment via the facilitator's /settle (x402). Returns
     (success, settlement); the settlement dict goes back in X-PAYMENT-RESPONSE so the
     caller has on-chain proof (tx hash) that this render was paid."""
-    fac = _cfg()["facilitator"]
-    if not fac:
-        return False, {"error": "no facilitator configured"}
     try:
         payload = json.loads(base64.b64decode(x_payment_b64))
     except Exception:
-        return False, {"error": "malformed X-PAYMENT header"}
+        return False, {"error": "malformed payment header"}
+
+    client = _sdk_client()
+    if client is not None:
+        try:
+            res = client.settle(*_sdk_models(payload, resource))
+            ok = bool(getattr(res, "success", False))
+            out = res.model_dump(by_alias=True) if hasattr(res, "model_dump") else {"success": ok}
+            return ok, out
+        except Exception as e:
+            return False, {"error": f"settlement failed: {e}"}
+
+    fac = _cfg()["facilitator"]
+    if not fac:
+        return False, {"error": "no facilitator configured"}
     body = json.dumps({"x402Version": 1, "paymentPayload": payload,
                        "paymentRequirements": payment_requirements(resource)["accepts"][0]}).encode()
     try:

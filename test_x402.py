@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault("DALANG_X402_PAYTO", "0xABCdef0000000000000000000000000000000001")
 os.environ.setdefault("DALANG_X402_ASSET", "0xUSDTonXLayer")
 os.environ.setdefault("DALANG_X402_FACILITATOR", "https://facilitator.example")
-import x402
+import okxpay as x402   # renamed from x402.py — that name shadowed OKX's own SDK package
 
 FAILS = []
 def check(name, cond):
