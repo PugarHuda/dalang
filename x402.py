@@ -47,12 +47,16 @@ def challenge(resource: str) -> dict:
     """
     c = _cfg()
     extra = {"name": c["asset_name"], "version": c["asset_version"]} if c["asset_name"] else {}
-    return {"x402Version": 1, "resource": resource, "accepts": [{
-        "scheme": "exact", "network": c["network"],
-        "amount": c["amount"], "maxAmountRequired": c["amount"],
-        "asset": c["asset"], "payTo": c["payTo"], "resource": resource,
-        "description": c["description"], "mimeType": "application/json",
-        "maxTimeoutSeconds": c["timeout"], "extra": extra}]}
+    return {"x402Version": 2,
+            # v2 models a resource as an object; v1 clients read the string copy inside accepts
+            "resource": {"url": resource, "description": c["description"],
+                         "mimeType": "application/json"},
+            "accepts": [{
+                "scheme": "exact", "network": c["network"],
+                "amount": c["amount"], "maxAmountRequired": c["amount"],
+                "asset": c["asset"], "payTo": c["payTo"], "resource": resource,
+                "description": c["description"], "mimeType": "application/json",
+                "maxTimeoutSeconds": c["timeout"], "extra": extra}]}
 
 def challenge_header(resource: str) -> bytes:
     """base64 of the challenge, for the PAYMENT-REQUIRED response header — a caller that
@@ -78,7 +82,8 @@ def verify(x_payment_b64: str, resource: str) -> tuple[bool, str]:
     # level. Checking only the top level rejected a real OKX payment before it ever reached
     # the facilitator.
     scheme = payload.get("scheme") or (payload.get("accepted") or {}).get("scheme")
-    if payload.get("x402Version") not in (1, "1") or scheme != "exact":
+    # v1 payloads arrive on X-PAYMENT, v2 on PAYMENT-SIGNATURE — accept both versions.
+    if str(payload.get("x402Version")) not in ("1", "2") or scheme != "exact":
         return False, "unsupported payment scheme"
     fac = _cfg()["facilitator"]
     if not fac:
@@ -172,10 +177,12 @@ class X402Middleware:
             return await self.app(scope, make_replay(), send)
 
         resource = f"{scope.get('scheme','https')}://{_header(scope, b'host') or 'localhost'}{MCP_PATH}"
-        # OKX's own SDK sends the signed payment as PAYMENT-SIG; the coinbase/x402 spec calls
-        # it X-PAYMENT. Reading only the latter meant an OKX-native caller could pay and still
-        # be answered 402 forever — accept either.
-        xp = _header(scope, b"payment-sig") or _header(scope, b"x-payment")
+        # Header names, straight from the SDK's own constants: a v2 payload arrives on
+        # PAYMENT-SIGNATURE, a v1 payload on X-PAYMENT (PAYMENT-SIG appears in the docs
+        # prose). Reading only X-PAYMENT meant an OKX-native caller could pay and still be
+        # answered 402 forever.
+        xp = (_header(scope, b"payment-signature") or _header(scope, b"payment-sig")
+              or _header(scope, b"x-payment"))
 
         async def reject(reason):  # emit the x402 402 challenge, no compute run
             out = json.dumps(payment_requirements(resource) | {"error": reason}).encode()

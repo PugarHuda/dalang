@@ -66,8 +66,10 @@ def main():
     r = call(paid)
     body = json.loads(r["body"])
     check("paid call, no X-PAYMENT -> 402", r["status"] == 402)
-    check("402 body is x402 v1 + payment requirements",
-          body.get("x402Version") == 1 and body["accepts"][0]["scheme"] == "exact")
+    check("402 body is an x402 v2 challenge + payment requirements",
+          body.get("x402Version") == 2 and body["accepts"][0]["scheme"] == "exact")
+    check("accepts keeps the v1 keys so older clients still parse it",
+          bool(body["accepts"][0].get("maxAmountRequired")) and isinstance(body["accepts"][0].get("resource"), str))
     # OKX's listing review reads the challenge from the HEADER, not the body — a body-only
     # 402 got the sibling listing rejected with "cannot obtain the payment requirements".
     hdr = r["headers"].get("payment-required", "")
@@ -77,8 +79,8 @@ def main():
     except Exception:
         ch = {}
     a = (ch.get("accepts") or [{}])[0]
-    check("header challenge is base64 of {x402Version, resource, accepts[]}",
-          ch.get("x402Version") == 1 and ch.get("resource", "").endswith("/mcp") and bool(a))
+    check("header challenge is base64 of a v2 {x402Version, resource, accepts[]}",
+          ch.get("x402Version") == 2 and (ch.get("resource") or {}).get("url", "").endswith("/mcp") and bool(a))
     check("challenge accept carries scheme/network/asset/amount/payTo/maxTimeoutSeconds/extra",
           all(k in a for k in ("scheme", "network", "asset", "amount", "payTo",
                                "maxTimeoutSeconds", "extra")))
