@@ -176,8 +176,12 @@ def main():
 
     print("\n== storyboard preview funnel (cheap: shots + hero, no video) ==")
     sb = server.storyboard(brief="a cozy cafe", aspect_ratio="9:16", target_seconds=20)
+    # hero is a thumbnailed JPEG now (a full-size PNG pushed the response past Vercel's
+    # ~4.5MB cap); the raw-PNG fallback still applies if thumbnailing fails
     check("preview: shots + hero poster, no video", len(sb.get("shots", [])) > 0
-          and sb.get("hero_data_uri", "").startswith("data:image/png") and "animatic_data_uri" not in sb)
+          and sb.get("hero_data_uri", "").startswith("data:image/") and "animatic_data_uri" not in sb)
+    check("preview hero is a small thumbnail, not a full-size frame",
+          len(sb.get("hero_data_uri", "")) < 1_200_000, str(len(sb.get("hero_data_uri", ""))))
 
     print("\n== composability: shot_list skips breakdown ==")
     pipeline.breakdown = boom

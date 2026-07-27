@@ -74,7 +74,11 @@ def verify(x_payment_b64: str, resource: str) -> tuple[bool, str]:
         return False, "malformed X-PAYMENT header"
     if not isinstance(payload, dict):  # valid base64 of a non-object (array/primitive) -> reject cleanly
         return False, "malformed X-PAYMENT header"
-    if payload.get("x402Version") != 1 or payload.get("scheme") != "exact":
+    # OKX's dialect nests the scheme inside `accepted`; coinbase/x402 puts it at the top
+    # level. Checking only the top level rejected a real OKX payment before it ever reached
+    # the facilitator.
+    scheme = payload.get("scheme") or (payload.get("accepted") or {}).get("scheme")
+    if payload.get("x402Version") not in (1, "1") or scheme != "exact":
         return False, "unsupported payment scheme"
     fac = _cfg()["facilitator"]
     if not fac:
