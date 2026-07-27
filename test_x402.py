@@ -68,6 +68,21 @@ def main():
     check("paid call, no X-PAYMENT -> 402", r["status"] == 402)
     check("402 body is x402 v1 + payment requirements",
           body.get("x402Version") == 1 and body["accepts"][0]["scheme"] == "exact")
+    # OKX's listing review reads the challenge from the HEADER, not the body — a body-only
+    # 402 got the sibling listing rejected with "cannot obtain the payment requirements".
+    hdr = r["headers"].get("payment-required", "")
+    check("402 carries a PAYMENT-REQUIRED header", bool(hdr))
+    try:
+        ch = json.loads(base64.b64decode(hdr))
+    except Exception:
+        ch = {}
+    a = (ch.get("accepts") or [{}])[0]
+    check("header challenge is base64 of {x402Version, resource, accepts[]}",
+          ch.get("x402Version") == 1 and ch.get("resource", "").endswith("/mcp") and bool(a))
+    check("challenge accept carries scheme/network/asset/amount/payTo/maxTimeoutSeconds/extra",
+          all(k in a for k in ("scheme", "network", "asset", "amount", "payTo",
+                               "maxTimeoutSeconds", "extra")))
+    check("amount matches maxAmountRequired", a.get("amount") == a.get("maxAmountRequired"))
     check("initialize -> free passthrough (200)", call({"jsonrpc": "2.0", "id": 0, "method": "initialize"})["status"] == 200)
     check("tools/list -> free (200)", call({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["status"] == 200)
     check("GET (SSE handshake) -> free", call({}, method="GET")["status"] == 200)

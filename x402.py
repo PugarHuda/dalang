@@ -38,15 +38,30 @@ def _cfg() -> dict:
 def enabled() -> bool:
     return bool(os.environ.get("DALANG_X402_PAYTO"))
 
-def payment_requirements(resource: str) -> dict:
-    """The x402 v1 402 body: what the caller must pay and where (X Layer)."""
+def challenge(resource: str) -> dict:
+    """The x402 challenge: {x402Version, resource, accepts:[…]}.
+
+    `amount` AND `maxAmountRequired` both carry the atomic price — the coinbase/x402 v1
+    body names it maxAmountRequired, while OKX's listing review requires `amount`; sending
+    both satisfies either reader.
+    """
     c = _cfg()
     extra = {"name": c["asset_name"], "version": c["asset_version"]} if c["asset_name"] else {}
-    return {"x402Version": 1, "error": "X-PAYMENT header is required", "accepts": [{
-        "scheme": "exact", "network": c["network"], "maxAmountRequired": c["amount"],
+    return {"x402Version": 1, "resource": resource, "accepts": [{
+        "scheme": "exact", "network": c["network"],
+        "amount": c["amount"], "maxAmountRequired": c["amount"],
         "asset": c["asset"], "payTo": c["payTo"], "resource": resource,
         "description": c["description"], "mimeType": "application/json",
         "maxTimeoutSeconds": c["timeout"], "extra": extra}]}
+
+def challenge_header(resource: str) -> bytes:
+    """base64 of the challenge, for the PAYMENT-REQUIRED response header — a caller that
+    reads only headers must still obtain the payment requirements."""
+    return base64.b64encode(json.dumps(challenge(resource), separators=(",", ":")).encode())
+
+def payment_requirements(resource: str) -> dict:
+    """The x402 v1 402 body: what the caller must pay and where (X Layer)."""
+    return challenge(resource) | {"error": "X-PAYMENT header is required"}
 
 def verify(x_payment_b64: str, resource: str) -> tuple[bool, str]:
     """Verify an X-PAYMENT header via the configured facilitator's /verify (x402).
@@ -159,6 +174,9 @@ class X402Middleware:
             out = json.dumps(payment_requirements(resource) | {"error": reason}).encode()
             await send({"type": "http.response.start", "status": 402,
                         "headers": [(b"content-type", b"application/json"),
+                                    (b"payment-required", challenge_header(resource)),
+                                    (b"www-authenticate", b'Payment realm="x402"'),
+                                    (b"access-control-expose-headers", b"PAYMENT-REQUIRED"),
                                     (b"content-length", str(len(out)).encode())]})
             await send({"type": "http.response.body", "body": out})
 
