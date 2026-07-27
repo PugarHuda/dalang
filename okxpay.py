@@ -96,7 +96,10 @@ def _sdk_models(payload: dict, resource: str):
     accepts = payment_requirements(resource)["accepts"][0]
     req = PaymentRequirements.model_validate(accepts)
     p = dict(payload)
-    p.setdefault("accepted", accepts)
+    # `accepted` is what the payment gets verified AGAINST, so it is ours, not the caller's:
+    # honouring a caller-supplied one would let them claim they agreed to pay 1 atomic unit.
+    # It also repairs a partial `accepted`, which the SDK model rejects outright.
+    p["accepted"] = accepts
     if isinstance(p.get("resource"), str):
         p.pop("resource")
     return PaymentPayload.model_validate(p), req
