@@ -44,6 +44,16 @@ This is a **separate** Vercel project from the landing page.
    is 300s (fine for the Ken Burns tier).
 3. **Settings → Environment Variables → `VENICE_API_KEY`** (+ any `DALANG_X402_*`,
    `DALANG_TOKENGATE_*`, `VENICE_*`). Do **not** commit the key.
+   For a **paid listing that passes OKX review**, also set the Developer Portal
+   credentials — the facilitator answers **403 to unsigned calls**, so without them the
+   paid path can never verify anything:
+   ```
+   OKX_API_KEY · OKX_SECRET_KEY · OKX_PASSPHRASE   # web3.okx.com/onchainos/dev-portal
+   ```
+   Set them from a shell that doesn't add a BOM — a PowerShell pipe prepends `﻿` and the
+   SDK's request signing then dies with `'ascii' codec can't encode character`, which
+   looks like a unicode problem in the EIP-712 name and sends you hunting the wrong
+   thing: `printf '%s' "<value>" | vercel env add OKX_API_KEY production`.
 4. **Deploy.** Endpoint: `https://<app>.vercel.app/mcp`.
 
 Caveats: serverless keeps no session (we run MCP `stateless_http`); only `/tmp` is
@@ -60,9 +70,29 @@ Two serverless limits to know:
   full-quality/long/cinematic renders set **`DALANG_UPLOAD_ENDPOINT`** (e.g. Vercel Blob /
   S3 / R2) so the mp4 is offloaded and a URL is returned instead of an inline blob.
 
+- **Reply as JSON, not SSE.** `api/index.py` passes `json_response=True`. With the default
+  SSE transport, Vercel's ASGI bridge cancels the stream before it flushes and every call
+  returns **HTTP 200 with an empty body** — `tools/list` included. A status-code-only smoke
+  test shows green while the endpoint serves nothing; `vercel logs` says
+  `ASGI callable returned without completing response`. **Always assert on the body.**
+
 ## Smoke test after deploy
-A raw `curl` won't work — MCP streamable HTTP needs the `initialize` handshake and a
-session. Use a FastMCP client (`pip install fastmcp`):
+With `json_response=True` a plain `curl` works (it did not before — the SSE stream
+returned nothing). Send both accept types:
+
+```bash
+curl -s -X POST https://<host>/mcp \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | head -c 300
+
+# the paid tool must answer 402 WITH the challenge header
+curl -sD - -o /dev/null -X POST https://<host>/mcp \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"generate_animatic","arguments":{"brief":"x"}}}' \
+  | grep -i payment-required
+```
+
+A FastMCP client works too (`pip install fastmcp`):
 ```bash
 python - <<'PY'
 import asyncio

@@ -67,17 +67,41 @@ storyboard and call DALANG purely as the render primitive.
 
 **Two-tier funnel:** a cheap `storyboard(brief=...)` tool returns just the shot list +
 a hero frame (a preview, free at the x402 layer) so a caller can approve the direction
-before paying for the full `generate_animatic` render.
+before paying for the full `generate_animatic` render. The hero comes back as a small
+JPEG thumbnail — a full-size PNG alone pushed the response past the ~4.5 MB serverless
+body cap, and this is the first tool most callers try.
+
+**Serverless gotcha worth keeping:** `api/index.py` builds the MCP app with
+`json_response=True`. With the default SSE transport, Vercel's ASGI bridge cancels the
+stream before it flushes and **every call returns HTTP 200 with an empty body** — tools
+list included. Status-code-only smoke tests never catch it; `vercel logs` shows
+`ASGI callable returned without completing response`.
 
 ## Native x402 payments on X Layer (OKX A2MCP)
-OKX A2MCP settles pay-per-call as an **x402** flow on **X Layer** (USDT/USDG via the
-Agent Payments Protocol). DALANG speaks it natively: set `DALANG_X402_PAYTO` (your X
-Layer wallet) and the paid `tools/call` answers **HTTP 402** with x402 payment
-requirements until the caller pays — the handshake and `tools/list` stay free. Payment
-is verified/settled by a configured **facilitator** (`DALANG_X402_FACILITATOR`), so no
-private key ever touches this server. Off by default (unset → the free / access_key flow
-is unchanged). See `x402.py` + `test_x402.py`. This is the piece that only works inside
-OKX's ecosystem — the render engine is portable, the *on-chain metered billing* is not.
+OKX A2MCP settles pay-per-call as an **x402** flow on **X Layer**. DALANG speaks it
+natively: set `DALANG_X402_PAYTO` (your X Layer wallet) and the paid `tools/call` answers
+**HTTP 402** until the caller pays — the handshake, `tools/list`, `quote` and the
+`storyboard` preview stay free. No private key ever touches this server. Off by default
+(unset → the free / access_key flow is unchanged). See `okxpay.py` + `test_x402.py`.
+
+**The wire protocol as OKX actually speaks it** — each line below cost a listing
+rejection to learn:
+
+| | |
+|---|---|
+| Challenge out | `PAYMENT-REQUIRED` **response header**, base64 of `{x402Version, resource, accepts:[…]}` — a body-only 402 is not enough |
+| Version | **x402 v2**: `amount`, `payTo`, `resource` as an *object*; the v1 keys ride along inside `accepts` for older clients |
+| Payment in | `PAYMENT-SIGNATURE` (v2) or `X-PAYMENT` (v1) |
+| Proof out | `PAYMENT-RESPONSE` **and** `X-PAYMENT-RESPONSE` |
+| Verify/settle | OKX's **official seller SDK** (`pip install okxweb3-app-x402`) when `OKX_API_KEY` / `OKX_SECRET_KEY` / `OKX_PASSPHRASE` are set — the facilitator **403s unsigned calls**, so the credentials are not optional ([Developer Portal](https://web3.okx.com/onchainos/dev-portal)) |
+
+The payment is verified against **our** quoted requirement, never the `accepted` block a
+caller claims — otherwise anyone could assert they had agreed to pay 1 atomic unit. The
+module is `okxpay.py`, not `x402.py`, because the official SDK installs a package by that
+exact name and a local module would shadow it.
+
+This is the piece that only works inside OKX's ecosystem — the render engine is portable,
+the *on-chain metered billing* is not.
 
 ## Web3 provenance & NFT-ready output
 Every render returns on-chain-ready provenance (dep-free, deterministic, no RPC):
@@ -104,7 +128,7 @@ and receives a **provably-authored, mint-ready, co-owned** creative asset. See `
 dalang/
 ├── pipeline.py     # script → shot list → frames → voiceover → animatic (+ self-check)
 ├── server.py       # FastMCP server; one tool = one pay-per-call
-├── x402.py         # x402 / X Layer paid-endpoint gate (OKX A2MCP), opt-in
+├── okxpay.py       # x402 v2 gate + OKX seller-SDK verify/settle (opt-in)
 ├── provenance.py   # content fingerprint + IPFS CID + mint-ready NFT metadata
 ├── tokengate.py    # X Layer token-gating (balanceOf)
 ├── contracts/      # DalangCredits.sol — ERC-20 render-credit token (1 credit = 1 render)
@@ -116,12 +140,24 @@ dalang/
 └── demo-x-post.md  # #OKXAI post + 90s storyboard
 ```
 
-## List on OKX.AI (required to be eligible)
-1. Register an OKX Agentic Wallet → `okx.ai/tutorial/asp`, choose **A2MCP** mode.
-2. Deploy `server.py` on a container/MCP host and register its URL as an ASP.
-3. Set a **per-call price** (below). USDT/USDG settlement on X Layer is handled by OKX.
-4. Pass OKX's internal review → **go live**. (Without this, the submission is invalid.)
-5. Post a ≤90s demo on X with **#OKXAI** and submit the Google Form.
+## On OKX.AI
+DALANG is registered as an **A2MCP ASP — Agent #7234** on X Layer (chain 196), wallet
+`0xc87ac386…8307`, paid service `Storyboard to Animatic Video` at **$0.49 USDT0**, live
+endpoint `https://dalang-engine.vercel.app/mcp`. Listing status: **under review**.
+
+To list one yourself: register an Agentic Wallet, `agent create` as **A2MCP** with your
+deployed `https://…/mcp` endpoint and a per-call fee, then activate → review (~24h).
+
+**What that review actually checks** — four rejections, four distinct causes:
+1. **`PAYMENT-REQUIRED` header missing** — the challenge must be a base64 response
+   header, not only a JSON body.
+2. **Wrong protocol version** — OKX is on **x402 v2**; a v1-only endpoint that rejects
+   v2 payloads fails.
+3. **Not on the official SDK** — the facilitator 403s unsigned calls, so verification is
+   impossible without Developer Portal credentials.
+4. **"Missing description / parameter details / usage examples"** — describe the service
+   by its exact tool names and arguments, and make sure `tools/list` actually returns the
+   schema when they probe it (an empty-body deploy reads as "no parameters").
 
 > Note: the `web/` landing page is on Vercel. The **render engine** runs on a
 > container host (Railway/Render/Fly, one command via the shipped `Dockerfile`).

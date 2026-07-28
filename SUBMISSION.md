@@ -16,7 +16,10 @@ DALANG — Storyboard-to-Animatic Studio
 ```
 7234
 ```
-(DALANG registered on-chain on X Layer — status "Listing under review" as of 2026-07-22.
+(DALANG registered on-chain on X Layer. Listing was rejected twice — first for a thin
+service description, then for not using OKX's official payment SDK — and resubmitted on
+2026-07-28 after migrating to the SDK, x402 v2 and the PAYMENT-REQUIRED header. Status as
+of that resubmit: "Listing under review", no remark.
 tx: 0xa4147829e1b727ecee9a29a9badf512518bfda13473ca9be26d2b02dfe7d8dfc · EVM wallet:
 0xc87ac386c485afd1c9b4087c8efe5daeeab08307)
 
